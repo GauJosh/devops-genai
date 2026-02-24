@@ -4,16 +4,19 @@
 
 Build a production-oriented AI-powered DevOps assistant that demonstrates:
 
-- RAG architecture
+- Deep RAG architecture understanding
 - Model abstraction layer
-- Kubernetes deployment
-- Observability
-- Agent workflows
-- Framework evaluation (LangChain, CrewAI)
-- Cost and token monitoring
+- OpenAI + local model interoperability
+- Kubernetes-native deployment
+- LLM serving infrastructure
+- Observability and cost governance
+- Agent workflows (LangChain / CrewAI)
+- AI gateway & security patterns
 - Enterprise translation patterns (Azure OpenAI / AKS)
 
 This project is designed as an **AI Platform Engineering Lab**, not just a GenAI demo.
+
+The goal is to move from "using AI APIs" to **engineering AI systems in production**.
 
 ---
 
@@ -21,34 +24,47 @@ This project is designed as an **AI Platform Engineering Lab**, not just a GenAI
 
 **Goal:** RAG service in plain Python that is understandable and debuggable.
 
-### Core RAG Capabilities
+## Core RAG Capabilities
+
 - [ ] Document ingestion endpoint
-- [ ] Chunking logic
+- [ ] Chunking logic (logs vs docs aware)
 - [ ] Embedding generation
 - [ ] Vector storage (Chroma initially)
 - [ ] Retrieval logic (top-k + scoring)
+- [ ] Context injection strategy
 - [ ] Prompt templating
-- [ ] Response citations
 - [ ] Prompt versioning
-- [ ] Basic evaluation harness
+- [ ] Response citations
+- [ ] Basic evaluation harness (golden prompts)
 
-### Cost & Usage
+## Cost & Usage Awareness
+
 - [ ] Token logging
 - [ ] Cost estimation per request
 - [ ] Simple usage reporting endpoint
+- [ ] Prompt version tracking
+
+## Data Layer Evolution
+
+- [ ] Replace Chroma with PostgreSQL + pgvector (optional)
+- [ ] Add Redis caching layer (optional)
+- [ ] Embedding model comparison
 
 ---
 
-# Phase 2 – Platform
+# Phase 2 – Platform Engineering
 
 **Goal:** Production-style deployment patterns.
 
-### Containerization
+## Containerization
+
 - [ ] Dockerfile
 - [ ] Multi-stage build (optional)
-- [ ] Environment variable configuration
+- [ ] Environment-based configuration
+- [ ] Secret management pattern
 
-### Kubernetes
+## Kubernetes
+
 - [ ] Deployment manifest
 - [ ] Service
 - [ ] ConfigMaps
@@ -57,26 +73,59 @@ This project is designed as an **AI Platform Engineering Lab**, not just a GenAI
 - [ ] Liveness probe
 - [ ] Readiness probe
 - [ ] Resource limits/requests
+- [ ] Load testing (basic k6 or similar)
 
-### API Hardening
-- [ ] Basic authentication (optional)
-- [ ] Rate limiting
-- [ ] Environment-based configuration
+## Infrastructure as Code
+
+- [ ] Helm chart for deployment
+- [ ] Values-based configuration
+- [ ] Terraform skeleton for cloud translation
 
 ---
 
-# Phase 3 – Observability
+# Phase 2.5 – Model Serving & LLM Infrastructure
+
+**Goal:** Understand and operationalize LLM inference beyond API usage.
+
+## Local Model Serving
+
+- [ ] Run Ollama locally
+- [ ] Benchmark latency vs OpenAI API
+- [ ] Run vLLM locally
+- [ ] Compare CPU vs GPU inference behavior
+- [ ] Concurrency stress testing
+
+## Kubernetes Model Serving
+
+- [ ] Deploy Ollama/vLLM to minikube
+- [ ] Evaluate cold start behavior
+- [ ] Horizontal scaling of inference pods
+- [ ] Latency under load testing
+
+## KServe (Advanced)
+
+- [ ] Deploy model via KServe InferenceService
+- [ ] Compare KServe vs raw deployment
+- [ ] Explore autoscaling behavior
+- [ ] Canary model rollout strategy
+
+---
+
+# Phase 3 – Observability & Cost Governance
 
 **Goal:** Treat AI workload like production infrastructure.
 
-- [ ] Request latency logging
 - [ ] Structured logs (JSON)
-- [ ] Token usage metrics
+- [ ] Request latency logging
+- [ ] Latency percentiles (p95, p99)
+- [ ] Token usage per endpoint
 - [ ] Cost per request estimation
 - [ ] Metrics endpoint (/metrics)
 - [ ] Prometheus integration
-- [ ] OpenTelemetry tracing (optional)
-- [ ] Request correlation IDs
+- [ ] OpenTelemetry tracing
+- [ ] Correlation IDs
+- [ ] Retrieval quality logging
+- [ ] Prompt regression tracking
 
 ---
 
@@ -89,7 +138,8 @@ This project is designed as an **AI Platform Engineering Lab**, not just a GenAI
 - [ ] CI failure summarizer
 - [ ] Incident analysis endpoint
 - [ ] Postmortem draft generator
-- [ ] GitHub webhook integration (optional)
+- [ ] Terraform PR reviewer (optional)
+- [ ] GitHub webhook integration
 
 ---
 
@@ -107,8 +157,6 @@ This project is designed as an **AI Platform Engineering Lab**, not just a GenAI
 - [ ] `/ask?engine=core`
 - [ ] `/ask?engine=langchain`
 
----
-
 ## CrewAI
 
 **Goal:** Multi-agent DevOps workflows.
@@ -124,15 +172,25 @@ This project is designed as an **AI Platform Engineering Lab**, not just a GenAI
 - [ ] Evidence-backed output
 - [ ] Confidence scoring
 
----
-
 ## Optional Frameworks
 
 - [ ] LlamaIndex comparison
-- [ ] Ollama / vLLM local inference
-- [ ] Prompt regression testing
 - [ ] Guardrails evaluation
-- [ ] Embedding model comparison
+- [ ] Prompt regression automation
+
+---
+
+# Phase 5.5 – AI Gateway & Security Patterns
+
+**Goal:** Production readiness for multi-tenant AI workloads.
+
+- [ ] API key / JWT authentication
+- [ ] Role-based access patterns
+- [ ] Rate limiting per tenant
+- [ ] Per-tenant quotas
+- [ ] Prompt injection mitigation
+- [ ] PII / secret redaction checks
+- [ ] Tool-call allowlist enforcement
 
 ---
 
@@ -145,18 +203,20 @@ This project is designed as an **AI Platform Engineering Lab**, not just a GenAI
 - [ ] Azure Monitor integration
 - [ ] AAD authentication
 - [ ] Enterprise cost tracking
-- [ ] Multi-tenant considerations
+- [ ] Multi-tenant isolation patterns
+- [ ] AI governance documentation
 
 ---
 
 # Repository Structure Target
-core/ # Framework-agnostic logic
-adapters/ # OpenAI / Azure OpenAI / local model adapters
-rag/ # Chunking, embedding, retrieval
-agents/ # LangChain / CrewAI implementations
-api/ # FastAPI endpoints
-deploy/ # Docker + Kubernetes manifests
-observability/ # Metrics, tracing, logging utilities
+- [ ] core/ # Framework-agnostic logic
+- [ ] adapters/ # OpenAI / Azure OpenAI / local model adapters
+- [ ] rag/ # Chunking, embedding, retrieval
+- [ ] agents/ # LangChain / CrewAI implementations
+- [ ] api/ # FastAPI endpoints
+- [ ] deploy/ # Docker + Kubernetes manifests / Helm
+- [ ] observability/ # Metrics, tracing, logging utilities
+- [ ] infra/ # Terraform (cloud translation)
 
 
 ---
@@ -167,10 +227,12 @@ This project should demonstrate:
 
 - Deep understanding of RAG internals
 - Ability to operationalize LLM systems
-- Platform engineering mindset
-- Infrastructure-aware AI implementation
+- LLM infrastructure & serving knowledge
+- Kubernetes-native AI deployment
+- AI cost optimization awareness
+- Observability-first thinking
 - Framework evaluation capability
-- Production-readiness thinking
+- Enterprise AI platform readiness
 
 The goal is not to build a toy AI app.
 
