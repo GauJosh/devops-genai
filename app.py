@@ -108,8 +108,25 @@ class AskResponse(BaseModel):
     retrieved: List[RetrievedChunk]
     usage: Optional[Dict[str, Any]] = None
 
+
 class ChatRequest(BaseModel):
     prompt: str
+
+
+class SourceSummary(BaseModel):
+    source: str
+    content_type: str
+    chunks: int
+
+
+class IngestedItem(BaseModel):
+    id: str
+    doc_id: str
+    source: str
+    content_type: str
+    chunk_index: int
+    text: str
+
 
 @app.get("/healthz")
 def healthz():
@@ -338,3 +355,76 @@ def ask(req: AskRequest):
         retrieved=retrieved,
         usage=resp.usage.model_dump() if resp.usage else None,
     )
+
+@app.get("/sources", response_model=List[SourceSummary])
+def list_sources(limit: int = 5000):
+    """
+    Summary of what's ingested: counts by (source, content_type).
+    limit is a safety cap (fine for local dev).
+    """
+    data = collection.get(include=["metadatas"], limit=limit)
+
+    metadatas = data.get("metadatas", []) or []
+    counts = {}
+
+    for m in metadatas:
+        src = m.get("source", "unknown")
+        ctype = m.get("content_type", "unknown")
+        key = (src, ctype)
+        counts[key] = counts.get(key, 0) + 1
+
+    # stable ordering for readability
+    out = [
+        SourceSummary(source=src, content_type=ctype, chunks=n)
+        for (src, ctype), n in sorted(counts.items(), key=lambda x: (x[0][0], x[0][1]))
+    ]
+    return out
+
+@app.get("/ingested", response_model=List[IngestedItem])
+def list_ingested(
+    limit: int = 200,
+    source: Optional[str] = None,
+    content_type: Optional[Literal["logs", "docs"]] = None,
+    doc_id: Optional[str] = None,
+):
+    """
+    Detailed view of ingested chunks (id + metadata + text).
+
+    Notes:
+    - Chroma get() supports metadata filtering via `where`.
+    - limit is important so we don't dump huge amounts accidentally.
+    """
+    where = {}
+    if source:
+        where["source"] = source
+    if content_type:
+        where["content_type"] = content_type
+    if doc_id:
+        where["doc_id"] = doc_id
+
+    kwargs = dict(include=["documents", "metadatas"])
+    if where:
+        kwargs["where"] = where
+
+    data = collection.get(limit=limit, **kwargs)
+
+    ids = data.get("ids", []) or []
+    docs = data.get("documents", []) or []
+    metas = data.get("metadatas", []) or []
+
+    out: List[IngestedItem] = []
+    for _id, doc, meta in zip(ids, docs, metas):
+        out.append(
+            IngestedItem(
+                id=_id,
+                doc_id=meta.get("doc_id", ""),
+                source=meta.get("source", "unknown"),
+                content_type=meta.get("content_type", "unknown"),
+                chunk_index=int(meta.get("chunk_index", -1)),
+                text=doc,
+            )
+        )
+
+    # sort to make output deterministic and easier to scan
+    out.sort(key=lambda x: (x.source, x.content_type, x.doc_id, x.chunk_index))
+    return out

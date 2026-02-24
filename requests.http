@@ -1,0 +1,37 @@
+### Health
+GET http://localhost:8000/healthz
+
+### Sources summary
+GET http://localhost:8000/sources
+
+### Ingest docs
+POST http://localhost:8000/ingest
+Content-Type: application/json
+
+{
+  "source": "runbook-demo",
+  "content_type": "docs",
+  "text": "HPA scales pods based on CPU or custom metrics...",
+  "chunk_size": 800,
+  "chunk_overlap": 100
+}
+
+### Ask docs only
+POST http://localhost:8000/ask
+Content-Type: application/json
+
+{
+  "question": "How does HPA scale?",
+  "content_type": "docs",
+  "top_k": 5
+}
+
+### Ask logs only
+POST http://localhost:8000/ask
+Content-Type: application/json
+
+{
+  "question": "What could cause a connection reset?",
+  "content_type": "logs",
+  "top_k": 5
+}
