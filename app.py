@@ -9,6 +9,9 @@ from openai import OpenAI
 import hashlib
 
 import chromadb
+import time
+import threading
+from collections import defaultdict
 
 
 load_dotenv()
@@ -16,6 +19,43 @@ load_dotenv()
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
+
+# ---- Pricing (USD per 1M tokens) ----
+DEFAULT_PRICING_PER_1M = {
+    # Chat model
+    "gpt-4o-mini": {"input": 0.15, "output": 0.60},  # per 1M tokens :contentReference[oaicite:2]{index=2}
+
+    # Embedding model
+    "text-embedding-3-small": {"input": 0.02, "output": 0.0},  # per 1M tokens :contentReference[oaicite:3]{index=3}
+}
+
+def get_pricing(model: str) -> dict:
+    # Allow overriding via env later if you want
+    return DEFAULT_PRICING_PER_1M.get(model, {"input": 0.0, "output": 0.0})
+
+def cost_usd(model: str, input_tokens: int = 0, output_tokens: int = 0) -> float:
+    p = get_pricing(model)
+    return (input_tokens / 1_000_000) * p["input"] + (output_tokens / 1_000_000) * p["output"]
+
+
+# ---- In-memory cost tracking (simple + good for local dev) ----
+_cost_lock = threading.Lock()
+_cost_totals = {
+    "started_at": time.time(),
+    "total_usd": 0.0,
+    "by_endpoint": defaultdict(float),
+    "by_model": defaultdict(float),
+    "by_kind": defaultdict(float),  # e.g., "chat", "embeddings"
+}
+
+def add_cost(endpoint: str, model: str, kind: str, amount_usd: float):
+    if amount_usd <= 0:
+        return
+    with _cost_lock:
+        _cost_totals["total_usd"] += amount_usd
+        _cost_totals["by_endpoint"][endpoint] += amount_usd
+        _cost_totals["by_model"][model] += amount_usd
+        _cost_totals["by_kind"][kind] += amount_usd
 
 # Prompt versioning
 PROMPT_VERSION = "v1"
@@ -108,6 +148,13 @@ class AskResponse(BaseModel):
     retrieved: List[RetrievedChunk]
     usage: Optional[Dict[str, Any]] = None
 
+    embed_tokens: int = 0
+    embed_cost_usd: float = 0.0
+    chat_prompt_tokens: int = 0
+    chat_completion_tokens: int = 0
+    chat_cost_usd: float = 0.0
+    total_cost_usd: float = 0.0
+
 
 class ChatRequest(BaseModel):
     prompt: str
@@ -119,13 +166,11 @@ class SourceSummary(BaseModel):
     chunks: int
 
 
-class IngestedItem(BaseModel):
-    id: str
+class IngestResponse(BaseModel):
     doc_id: str
-    source: str
-    content_type: str
-    chunk_index: int
-    text: str
+    chunks_added: int
+    embed_tokens: int
+    embed_cost_usd: float
 
 
 @app.get("/healthz")
@@ -161,23 +206,48 @@ def chat(req: ChatRequest):
 
 def chunk_docs(text: str, chunk_size: int, overlap: int) -> List[str]:
     """
-    Basic doc chunker: sliding window by characters.
-    Good enough to start; we can upgrade later.
+    Paragraph-aware chunker:
+    - Split by blank lines into paragraphs
+    - Pack paragraphs into chunks up to chunk_size
+    - Add overlap by carrying last ~overlap chars from previous chunk
     """
     text = text.strip()
     if not text:
         return []
 
-    chunks = []
-    start = 0
-    while start < len(text):
-        end = min(start + chunk_size, len(text))
-        chunk = text[start:end].strip()
-        if chunk:
+    paras = [p.strip() for p in text.split("\n\n") if p.strip()]
+    chunks: List[str] = []
+    cur: List[str] = []
+    cur_len = 0
+
+    for p in paras:
+        p_len = len(p) + 2
+        if cur and (cur_len + p_len > chunk_size):
+            chunk = "\n\n".join(cur).strip()
             chunks.append(chunk)
-        if end == len(text):
-            break
-        start = max(0, end - overlap)
+
+            if overlap > 0 and chunk:
+                tail = chunk[-overlap:]
+                cur = [tail]
+                cur_len = len(tail)
+            else:
+                cur = []
+                cur_len = 0
+
+        cur.append(p)
+        cur_len += p_len
+
+    if cur:
+        chunks.append("\n\n".join(cur).strip())
+
+    # Fallback: if everything was one giant paragraph
+    if len(chunks) == 1 and len(chunks[0]) > chunk_size:
+        return [
+            text[i : i + chunk_size].strip()
+            for i in range(0, len(text), max(1, chunk_size - overlap))
+            if text[i : i + chunk_size].strip()
+        ]
+
     return chunks
 
 
@@ -210,13 +280,20 @@ def chunk_logs(text: str, max_chars: int, overlap_lines: int = 5) -> List[str]:
     return chunks
 
 
-def embed_texts(texts: List[str]) -> List[List[float]]:
+def embed_texts(texts: List[str]) -> tuple[List[List[float]], int]:
     if not client:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set in .env")
 
     resp = client.embeddings.create(model=EMBED_MODEL, input=texts)
-    # Keep ordering aligned with input
-    return [item.embedding for item in resp.data]
+    # embeddings are aligned with input order
+    vectors = [item.embedding for item in resp.data]
+
+    # Embeddings API includes usage in current SDKs; default to 0 if missing
+    prompt_tokens = 0
+    if getattr(resp, "usage", None) and getattr(resp.usage, "prompt_tokens", None) is not None:
+        prompt_tokens = int(resp.usage.prompt_tokens)
+
+    return vectors, prompt_tokens
 
 
 @app.post("/ingest", response_model=IngestResponse)
@@ -234,7 +311,9 @@ def ingest(req: IngestRequest):
     if not chunks:
         raise HTTPException(status_code=400, detail="No chunks produced from input text")
 
-    embeddings = embed_texts(chunks)
+    embeddings, embed_tokens = embed_texts(chunks)
+    embed_cost = cost_usd(EMBED_MODEL, input_tokens=embed_tokens, output_tokens=0)
+    add_cost(endpoint="/ingest", model=EMBED_MODEL, kind="embeddings", amount_usd=embed_cost)
 
     ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
     metadatas = [
@@ -249,7 +328,12 @@ def ingest(req: IngestRequest):
         metadatas=metadatas,
     )
 
-    return IngestResponse(doc_id=doc_id, chunks_added=len(chunks))
+    return IngestResponse(
+        doc_id=doc_id,
+        chunks_added=len(chunks),
+        embed_tokens=embed_tokens,
+        embed_cost_usd=round(embed_cost, 10),
+    )
 
 
 @app.post("/ask", response_model=AskResponse)
@@ -257,7 +341,11 @@ def ask(req: AskRequest):
     if not client:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set in .env")
 
-    q_embed = embed_texts([req.question])[0]
+    q_vecs, q_embed_tokens = embed_texts([req.question])
+    q_embed = q_vecs[0]
+
+    embed_cost = cost_usd(EMBED_MODEL, input_tokens=q_embed_tokens, output_tokens=0)
+    add_cost(endpoint="/ask", model=EMBED_MODEL, kind="embeddings", amount_usd=embed_cost)
 
     # Optional filters for source/content_type
     where = {}
@@ -347,13 +435,27 @@ def ask(req: AskRequest):
         ],
     )
 
+    # Chat cost from usage tokens
+    chat_in = int(resp.usage.prompt_tokens) if resp.usage else 0
+    chat_out = int(resp.usage.completion_tokens) if resp.usage else 0
+    chat_cost = cost_usd(OPENAI_MODEL, input_tokens=chat_in, output_tokens=chat_out)
+    add_cost(endpoint="/ask", model=OPENAI_MODEL, kind="chat", amount_usd=chat_cost)
+
     answer = resp.choices[0].message.content
+
+    total = embed_cost + chat_cost
 
     return AskResponse(
         answer=answer,
         prompt_version=PROMPT_VERSION,
         retrieved=retrieved,
         usage=resp.usage.model_dump() if resp.usage else None,
+        embed_tokens=q_embed_tokens,
+        embed_cost_usd=round(embed_cost, 10),
+        chat_prompt_tokens=chat_in,
+        chat_completion_tokens=chat_out,
+        chat_cost_usd=round(chat_cost, 10),
+        total_cost_usd=round(total, 10),
     )
 
 @app.get("/sources", response_model=List[SourceSummary])
@@ -428,3 +530,43 @@ def list_ingested(
     # sort to make output deterministic and easier to scan
     out.sort(key=lambda x: (x.source, x.content_type, x.doc_id, x.chunk_index))
     return out
+
+@app.get("/costs")
+def costs():
+    with _cost_lock:
+        return {
+            "started_at": _cost_totals["started_at"],
+            "uptime_seconds": time.time() - _cost_totals["started_at"],
+            "total_usd": round(_cost_totals["total_usd"], 8),
+            "by_endpoint": {k: round(v, 8) for k, v in _cost_totals["by_endpoint"].items()},
+            "by_model": {k: round(v, 8) for k, v in _cost_totals["by_model"].items()},
+            "by_kind": {k: round(v, 8) for k, v in _cost_totals["by_kind"].items()},
+        }
+
+@app.delete("/reset")
+def reset_collection(confirm: bool = False):
+    """
+    Deletes ALL stored chunks. For local dev only.
+    """
+    if not confirm:
+        raise HTTPException(status_code=400, detail="Set confirm=true to reset")
+
+    chroma_client.delete_collection("devops_knowledge")
+    global collection
+    collection = chroma_client.get_or_create_collection(name="devops_knowledge")
+    return {"status": "ok", "message": "collection reset"}
+
+
+@app.delete("/delete_source")
+def delete_source(source: str):
+    """
+    Deletes all chunks that match a source label.
+    """
+    # Fetch ids matching the filter
+    data = collection.get(where={"source": source}, include=["metadatas"])
+    ids = data.get("ids", []) or []
+    if not ids:
+        return {"status": "ok", "deleted": 0, "source": source}
+
+    collection.delete(ids=ids)
+    return {"status": "ok", "deleted": len(ids), "source": source}

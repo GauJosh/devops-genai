@@ -1,0 +1,16 @@
+[
+  {
+    "name": "HPA docs grounded",
+    "question": "How does HPA scale?",
+    "filters": { "content_type": "docs" },
+    "must_contain_any": ["CPU", "custom metrics"],
+    "must_cite": true
+  },
+  {
+    "name": "Logs structured output",
+    "question": "What could cause a connection reset?",
+    "filters": { "content_type": "logs" },
+    "must_contain_any": ["Evidence from context", "Hypotheses", "Next data to ingest"],
+    "must_cite": true
+  }
+]
