@@ -1,0 +1,52 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: devops-genai
+  namespace: devops-genai
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: devops-genai
+  template:
+    metadata:
+      labels:
+        app: devops-genai
+    spec:
+      containers:
+        - name: api
+          image: localhost/devops-genai:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+          envFrom:
+            - configMapRef:
+                name: devops-genai-config
+            - secretRef:
+                name: devops-genai-secrets
+          readinessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          volumeMounts:
+            - name: chroma-data
+              mountPath: /data/chroma_db
+      volumes:
+      - name: chroma-data
+        persistentVolumeClaim:
+          claimName: chroma-pvc

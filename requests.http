@@ -16,6 +16,18 @@ Content-Type: application/json
   "chunk_overlap": 100
 }
 
+### Ingest logs
+POST http://localhost:8000/ingest
+Content-Type: application/json
+
+{
+  "source":"k8s-test",
+  "content_type":"docs",
+  "text":"If metrics-server is missing, HPA will not have CPU metrics and will not scale.",
+  "chunk_size":800,
+  "chunk_overlap":100
+}
+
 ### Ask docs only
 POST http://localhost:8000/ask
 Content-Type: application/json

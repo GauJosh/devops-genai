@@ -115,11 +115,13 @@ class IngestRequest(BaseModel):
     chunk_size: int = Field(default=1200, ge=200, le=4000)
     chunk_overlap: int = Field(default=150, ge=0, le=1000)
 
-
-class IngestResponse(BaseModel):
+class IngestedItem(BaseModel):
+    id: str
     doc_id: str
-    chunks_added: int
-
+    source: str
+    content_type: str
+    chunk_index: int
+    text: str
 
 class AskRequest(BaseModel):
     question: str
