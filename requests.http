@@ -51,3 +51,32 @@ Content-Type: application/json
 ### Get costs breakdown
 GET http://localhost:8000/costs
 
+### Model hint gpt-4o-mini
+POST http://localhost:18000/ask
+Content-Type: application/json
+
+{
+    "question": "What does HPA do in Kubernetes?",
+    "top_k": 3,
+    "model_hint": "gpt-4o-mini"
+}
+  
+### Model hint mock-fast
+POST http://localhost:18000/ask
+Content-Type: application/json
+
+{
+    "question": "What does HPA do in Kubernetes?",
+    "top_k": 3,
+    "model_hint": "mock-fast"
+}
+
+### Model hint bad-model-name (should fallback to default)
+POST http://localhost:18000/ask
+Content-Type: application/json
+
+{
+    "question": "What does HPA do in Kubernetes?",
+    "top_k": 3,
+    "model_hint": "bad-model-name"
+}

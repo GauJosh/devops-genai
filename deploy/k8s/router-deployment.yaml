@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: inference-router
-          image: localhost/inference-router:1.0.3
+          image: localhost/inference-router:1.0.6
           imagePullPolicy: IfNotPresent
           env:
             - name: OPENAI_API_KEY
@@ -32,9 +32,9 @@ spec:
             - name: ROUTER_DEFAULT_PROVIDER
               value: "openai"
             - name: ROUTER_ENABLE_FALLBACK
-              value: "false"
+              value: "true"
             - name: ROUTER_FALLBACK_PROVIDER
-              value: ""
+              value: "mock"
           ports:
             - containerPort: 8000
           readinessProbe:

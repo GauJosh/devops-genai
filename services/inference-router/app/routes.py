@@ -4,6 +4,7 @@ import time
 from fastapi import APIRouter, HTTPException
 from .schemas import GenerateRequest, GenerateResponse, ErrorResponse
 from .adapters.openai_adapter import OpenAIAdapter
+from .adapters.mock_adapter import MockAdapter
 from .config import (
     ROUTER_DEFAULT_PROVIDER,
     ROUTER_ENABLE_FALLBACK,
@@ -27,10 +28,20 @@ if not logger.handlers:
 def get_adapter(provider_name: str):
     if provider_name == "openai":
         return OpenAIAdapter()
+    if provider_name == "mock":
+        return MockAdapter()
     raise ValueError(f"Unsupported provider: {provider_name}")
 
 
 def choose_primary_provider(req: GenerateRequest) -> str:
+    model_hint = (req.model_hint or "").lower()
+
+    if model_hint.startswith("mock"):
+        return "mock"
+
+    if model_hint.startswith("gpt"):
+        return "openai"
+
     return ROUTER_DEFAULT_PROVIDER
 
 

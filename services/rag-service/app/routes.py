@@ -139,6 +139,7 @@ class AskRequest(BaseModel):
     min_relevance: float = Field(default=1.2, ge=0.0, description="Distance threshold for filtering weak matches")
     content_type: Optional[Literal["logs", "docs"]] = None
     source: Optional[str] = None
+    model_hint: Optional[str] = None
 
 
 class RetrievedChunk(BaseModel):
@@ -389,6 +390,7 @@ def ask(req: AskRequest):
         "top_k": req.top_k,
         "content_type": req.content_type,
         "source": req.source,
+        "model_hint": req.model_hint,
     }))
 
     q_vecs, q_embed_tokens = embed_texts([req.question])
@@ -483,7 +485,7 @@ def ask(req: AskRequest):
 
         resp = generate_via_router(
             messages=messages,
-            model_hint=OPENAI_MODEL,
+            model_hint=req.model_hint or OPENAI_MODEL,
             request_id=request_id,
             purpose="rag",
         )
@@ -503,6 +505,7 @@ def ask(req: AskRequest):
             "event": "ask_request_complete",
             "request_id": request_id,
             "endpoint": "/ask",
+            "model_hint": req.model_hint or OPENAI_MODEL,
             "retrieved_count": len(retrieved),
             "embed_tokens": q_embed_tokens,
             "chat_input_tokens": chat_in,
