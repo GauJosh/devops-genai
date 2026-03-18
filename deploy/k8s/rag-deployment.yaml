@@ -1,21 +1,21 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: devops-genai
+  name: rag-service
   namespace: devops-genai
 spec:
   replicas: 1
   selector:
     matchLabels:
-      app: devops-genai
+      app: rag-service
   template:
     metadata:
       labels:
-        app: devops-genai
+        app: rag-service
     spec:
       containers:
         - name: api
-          image: localhost/devops-genai:latest
+          image: localhost/rag-service:local
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -24,6 +24,22 @@ spec:
                 name: devops-genai-config
             - secretRef:
                 name: devops-genai-secrets
+          env:
+          - name: INFERENCE_ROUTER_URL
+            value: "http://inference-router:8000"
+          - name: OPENAI_API_KEY
+            valueFrom:
+              secretKeyRef:
+                name: devops-genai-secrets
+                key: OPENAI_API_KEY
+          - name: OPENAI_MODEL_DEFAULT
+            value: "gpt-4o-mini"
+          - name: OPENAI_EMBED_MODEL
+            value: "text-embedding-3-small"
+          - name: CHROMA_DIR
+            value: "/data/chroma_db"
+          - name: OPENAI_MODEL
+            value: "gpt-4o-mini"
           readinessProbe:
             httpGet:
               path: /healthz
