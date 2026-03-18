@@ -3,10 +3,10 @@ import uuid
 import time
 import threading
 import hashlib
-from collections import defaultdict
-from typing import List, Optional, Literal, Dict, Any, Tuple
 import json
 import logging
+from collections import defaultdict
+from typing import List, Optional, Literal, Dict, Any, Tuple
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -71,10 +71,7 @@ Rules:
 # Pricing + cost tracking
 # ---------------------------
 DEFAULT_PRICING_PER_1M = {
-    # Chat model
-    "gpt-4o-mini": {"input": 0.15, "output": 0.60},  # USD per 1M tokens
-    # Embedding model
-    "text-embedding-3-small": {"input": 0.02, "output": 0.0},  # USD per 1M tokens
+    "text-embedding-3-small": {"input": 0.02, "output": 0.0},
 }
 
 
@@ -117,7 +114,7 @@ collection = chroma_client.get_or_create_collection(name="devops_knowledge")
 
 
 # ---------------------------
-# Schemas (same as your monolith)
+# Schemas
 # ---------------------------
 class IngestRequest(BaseModel):
     source: str = Field(default="manual", description="Where this text came from (runbook, logs, etc.)")
@@ -185,7 +182,7 @@ class IngestResponse(BaseModel):
 
 
 # ---------------------------
-# Helpers (same logic as monolith)
+# Helpers
 # ---------------------------
 def chunk_docs(text: str, chunk_size: int, overlap: int) -> List[str]:
     text = text.strip()
@@ -217,7 +214,6 @@ def chunk_docs(text: str, chunk_size: int, overlap: int) -> List[str]:
     if cur:
         chunks.append("\n\n".join(cur).strip())
 
-    # Fallback if one giant paragraph
     if len(chunks) == 1 and len(chunks[0]) > chunk_size:
         return [
             text[i : i + chunk_size].strip()
@@ -254,7 +250,6 @@ def chunk_logs(text: str, max_chars: int, overlap_lines: int = 5) -> List[str]:
 
 
 def embed_texts(texts: List[str]) -> Tuple[List[List[float]], int]:
-    # embeddings stay in rag-service for now (minimal refactor)
     if not client:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set")
 
@@ -269,7 +264,7 @@ def embed_texts(texts: List[str]) -> Tuple[List[List[float]], int]:
 
 
 # ---------------------------
-# Endpoints (restored)
+# Endpoints
 # ---------------------------
 @router.get("/healthz")
 def healthz():
@@ -314,7 +309,8 @@ def chat(req: ChatRequest):
 
         chat_in = int(usage.get("input_tokens", 0) or 0)
         chat_out = int(usage.get("output_tokens", 0) or 0)
-        chat_cost = cost_usd(OPENAI_MODEL, input_tokens=chat_in, output_tokens=chat_out)
+        chat_cost = float(usage.get("cost_usd", 0.0) or 0.0)
+
         add_cost(endpoint="/chat", model=OPENAI_MODEL, kind="chat", amount_usd=chat_cost)
 
         logger.info(json.dumps({
@@ -497,7 +493,8 @@ def ask(req: AskRequest):
 
         chat_in = int(usage.get("input_tokens", 0) or 0)
         chat_out = int(usage.get("output_tokens", 0) or 0)
-        chat_cost = cost_usd(OPENAI_MODEL, input_tokens=chat_in, output_tokens=chat_out)
+        chat_cost = float(usage.get("cost_usd", 0.0) or 0.0)
+
         add_cost(endpoint="/ask", model=OPENAI_MODEL, kind="chat", amount_usd=chat_cost)
 
         total = embed_cost + chat_cost
@@ -510,6 +507,7 @@ def ask(req: AskRequest):
             "embed_tokens": q_embed_tokens,
             "chat_input_tokens": chat_in,
             "chat_output_tokens": chat_out,
+            "chat_cost_usd": round(chat_cost, 10),
             "total_cost_usd": round(total, 10),
         }))
 
