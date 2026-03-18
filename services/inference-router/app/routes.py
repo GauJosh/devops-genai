@@ -9,6 +9,13 @@ from .config import (
     ROUTER_ENABLE_FALLBACK,
     ROUTER_FALLBACK_PROVIDER,
 )
+from .metrics import (
+    INFERENCE_REQUESTS_TOTAL,
+    INFERENCE_FAILURES_TOTAL,
+    INFERENCE_LATENCY_SECONDS,
+    INFERENCE_INPUT_TOKENS_TOTAL,
+    INFERENCE_OUTPUT_TOKENS_TOTAL,
+)
 
 router = APIRouter()
 
@@ -24,12 +31,6 @@ def get_adapter(provider_name: str):
 
 
 def choose_primary_provider(req: GenerateRequest) -> str:
-    # For now, always use configured default provider.
-    # Later this function can implement:
-    # - tenant-based routing
-    # - model-based routing
-    # - cost-aware routing
-    # - traffic splitting
     return ROUTER_DEFAULT_PROVIDER
 
 
@@ -107,6 +108,44 @@ def execute_with_provider(req: GenerateRequest, provider_name: str) -> GenerateR
     return adapter.generate(req)
 
 
+def record_success_metrics(req: GenerateRequest, resp: GenerateResponse):
+    provider = resp.provider
+    purpose = req.purpose or "unknown"
+    model = resp.model_used or "unknown"
+
+    INFERENCE_REQUESTS_TOTAL.labels(
+        provider=provider,
+        purpose=purpose,
+        model=model,
+    ).inc()
+
+    INFERENCE_LATENCY_SECONDS.labels(
+        provider=provider,
+        purpose=purpose,
+        model=model,
+    ).observe(resp.latency_ms / 1000.0)
+
+    INFERENCE_INPUT_TOKENS_TOTAL.labels(
+        provider=provider,
+        purpose=purpose,
+        model=model,
+    ).inc(resp.usage.input_tokens)
+
+    INFERENCE_OUTPUT_TOKENS_TOTAL.labels(
+        provider=provider,
+        purpose=purpose,
+        model=model,
+    ).inc(resp.usage.output_tokens)
+
+
+def record_failure_metrics(provider: str, purpose: str, failure_stage: str):
+    INFERENCE_FAILURES_TOTAL.labels(
+        provider=provider,
+        purpose=purpose,
+        failure_stage=failure_stage,
+    ).inc()
+
+
 @router.post(
     "/v1/generate",
     response_model=GenerateResponse,
@@ -117,13 +156,20 @@ def generate(req: GenerateRequest):
     log_start(req)
 
     primary_provider = choose_primary_provider(req)
+    purpose = req.purpose or "unknown"
 
     try:
         resp = execute_with_provider(req, primary_provider)
+        record_success_metrics(req, resp)
         log_success(req, resp, int((time.time() - t0) * 1000))
         return resp
     except Exception as primary_error:
         primary_wall_time_ms = int((time.time() - t0) * 1000)
+        record_failure_metrics(
+            provider=primary_provider,
+            purpose=purpose,
+            failure_stage="primary_generation",
+        )
         log_primary_failure(req, primary_provider, primary_error, primary_wall_time_ms)
 
         fallback_provider = maybe_choose_fallback_provider(primary_provider)
@@ -144,10 +190,16 @@ def generate(req: GenerateRequest):
         try:
             log_fallback_attempt(req, fallback_provider)
             resp = execute_with_provider(req, fallback_provider)
+            record_success_metrics(req, resp)
             log_success(req, resp, int((time.time() - t0) * 1000))
             return resp
         except Exception as fallback_error:
             fallback_wall_time_ms = int((time.time() - t0) * 1000)
+            record_failure_metrics(
+                provider=fallback_provider,
+                purpose=purpose,
+                failure_stage="fallback_generation",
+            )
             log_fallback_failure(req, fallback_provider, fallback_error, fallback_wall_time_ms)
 
             raise HTTPException(

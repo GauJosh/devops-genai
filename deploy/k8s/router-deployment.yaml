@@ -12,10 +12,14 @@ spec:
     metadata:
       labels:
         app: inference-router
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "8000"
+        prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: inference-router
-          image: localhost/inference-router:1.0.2
+          image: localhost/inference-router:1.0.3
           imagePullPolicy: IfNotPresent
           env:
             - name: OPENAI_API_KEY
