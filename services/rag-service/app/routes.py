@@ -5,6 +5,8 @@ import threading
 import hashlib
 from collections import defaultdict
 from typing import List, Optional, Literal, Dict, Any, Tuple
+import json
+import logging
 
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
@@ -14,6 +16,10 @@ import chromadb
 from .inference_client import generate_via_router
 
 router = APIRouter()
+
+logger = logging.getLogger("rag-service")
+if not logger.handlers:
+    logging.basicConfig(level=logging.INFO)
 
 # ---------------------------
 # Config
@@ -278,28 +284,57 @@ def healthz():
 
 @router.post("/chat")
 def chat(req: ChatRequest):
-    # Chat generation now goes through inference-router
     if not OPENAI_API_KEY:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set")
+
+    request_id = str(uuid.uuid4())
 
     try:
         messages = [
             {"role": "system", "content": "You are a helpful DevOps assistant."},
             {"role": "user", "content": req.prompt},
         ]
-        resp = generate_via_router(messages=messages, model_hint=OPENAI_MODEL)
+
+        logger.info(json.dumps({
+            "event": "chat_request_start",
+            "request_id": request_id,
+            "endpoint": "/chat",
+            "model": OPENAI_MODEL,
+        }))
+
+        resp = generate_via_router(
+            messages=messages,
+            model_hint=OPENAI_MODEL,
+            request_id=request_id,
+            purpose="chat",
+        )
 
         answer_text = resp.get("output_text", "")
         usage = resp.get("usage", {}) or {}
 
-        # Track cost locally (router may also compute later; for now keep rag-service tracking too)
         chat_in = int(usage.get("input_tokens", 0) or 0)
         chat_out = int(usage.get("output_tokens", 0) or 0)
         chat_cost = cost_usd(OPENAI_MODEL, input_tokens=chat_in, output_tokens=chat_out)
         add_cost(endpoint="/chat", model=OPENAI_MODEL, kind="chat", amount_usd=chat_cost)
 
-        return {"answer": answer_text, "usage": usage}
+        logger.info(json.dumps({
+            "event": "chat_request_complete",
+            "request_id": request_id,
+            "endpoint": "/chat",
+            "model": OPENAI_MODEL,
+            "input_tokens": chat_in,
+            "output_tokens": chat_out,
+            "chat_cost_usd": round(chat_cost, 10),
+        }))
+
+        return {"answer": answer_text, "usage": usage, "request_id": request_id}
     except Exception as e:
+        logger.error(json.dumps({
+            "event": "chat_request_failed",
+            "request_id": request_id,
+            "endpoint": "/chat",
+            "error": str(e),
+        }))
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -348,14 +383,24 @@ def ask(req: AskRequest):
     if not client:
         raise HTTPException(status_code=400, detail="OPENAI_API_KEY not set")
 
-    # Embed the question
+    request_id = str(uuid.uuid4())
+
+    logger.info(json.dumps({
+        "event": "ask_request_start",
+        "request_id": request_id,
+        "endpoint": "/ask",
+        "question": req.question,
+        "top_k": req.top_k,
+        "content_type": req.content_type,
+        "source": req.source,
+    }))
+
     q_vecs, q_embed_tokens = embed_texts([req.question])
     q_embed = q_vecs[0]
 
     embed_cost = cost_usd(EMBED_MODEL, input_tokens=q_embed_tokens, output_tokens=0)
     add_cost(endpoint="/ask", model=EMBED_MODEL, kind="embeddings", amount_usd=embed_cost)
 
-    # Optional filters
     where = {}
     if req.content_type:
         where["content_type"] = req.content_type
@@ -414,6 +459,11 @@ def ask(req: AskRequest):
         )
 
     if not retrieved:
+        logger.info(json.dumps({
+            "event": "ask_request_no_context",
+            "request_id": request_id,
+            "endpoint": "/ask",
+        }))
         return AskResponse(
             answer="Insufficient context. Please ingest relevant data.",
             prompt_version=PROMPT_VERSION,
@@ -429,13 +479,18 @@ def ask(req: AskRequest):
         question=req.question,
     )
 
-    # Chat generation now goes through inference-router
     try:
         messages = [
             {"role": "system", "content": SYSTEM_PROMPT},
             {"role": "user", "content": user_prompt},
         ]
-        resp = generate_via_router(messages=messages, model_hint=OPENAI_MODEL)
+
+        resp = generate_via_router(
+            messages=messages,
+            model_hint=OPENAI_MODEL,
+            request_id=request_id,
+            purpose="rag",
+        )
 
         answer = resp.get("output_text", "")
         usage = resp.get("usage", {}) or {}
@@ -446,6 +501,17 @@ def ask(req: AskRequest):
         add_cost(endpoint="/ask", model=OPENAI_MODEL, kind="chat", amount_usd=chat_cost)
 
         total = embed_cost + chat_cost
+
+        logger.info(json.dumps({
+            "event": "ask_request_complete",
+            "request_id": request_id,
+            "endpoint": "/ask",
+            "retrieved_count": len(retrieved),
+            "embed_tokens": q_embed_tokens,
+            "chat_input_tokens": chat_in,
+            "chat_output_tokens": chat_out,
+            "total_cost_usd": round(total, 10),
+        }))
 
         return AskResponse(
             answer=answer,
@@ -460,6 +526,12 @@ def ask(req: AskRequest):
             total_cost_usd=round(total, 10),
         )
     except Exception as e:
+        logger.error(json.dumps({
+            "event": "ask_request_failed",
+            "request_id": request_id,
+            "endpoint": "/ask",
+            "error": str(e),
+        }))
         raise HTTPException(status_code=502, detail=f"Inference failed: {e}")
 
 

@@ -3,14 +3,17 @@ from openai import OpenAI
 from ..schemas import GenerateRequest, GenerateResponse, Usage
 from ..config import OPENAI_API_KEY, OPENAI_MODEL_DEFAULT
 
-# NOTE: You already use OpenAI in your current app.py. :contentReference[oaicite:1]{index=1}
 _client = OpenAI(api_key=OPENAI_API_KEY)
 
 
 def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
-    # Minimal v1: keep it simple. You can reuse your existing pricing table later. :contentReference[oaicite:2]{index=2}
-    # If unknown, return 0.0 to avoid lying.
-    return 0.0
+    pricing = {
+        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+    }
+    p = pricing.get(model)
+    if not p:
+        return 0.0
+    return (input_tokens / 1_000_000) * p["input"] + (output_tokens / 1_000_000) * p["output"]
 
 
 class OpenAIAdapter:
@@ -20,7 +23,6 @@ class OpenAIAdapter:
         model = req.model_hint or OPENAI_MODEL_DEFAULT
         t0 = time.time()
 
-        # Convert to OpenAI messages schema
         messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
         resp = _client.chat.completions.create(
@@ -44,6 +46,10 @@ class OpenAIAdapter:
             provider=self.provider,
             model_used=model,
             output_text=text,
-            usage=Usage(input_tokens=input_tokens, output_tokens=output_tokens, cost_usd=cost),
+            usage=Usage(
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cost_usd=cost,
+            ),
             latency_ms=latency_ms,
         )

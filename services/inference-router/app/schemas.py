@@ -1,4 +1,4 @@
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Literal, Optional, Dict, Any
 
 
@@ -8,6 +8,8 @@ class ChatMessage(BaseModel):
 
 
 class GenerateRequest(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     request_id: Optional[str] = None
     tenant_id: Optional[str] = None
     purpose: Optional[str] = "rag"
@@ -19,7 +21,6 @@ class GenerateRequest(BaseModel):
     max_tokens: int = 800
     timeout_ms: int = 30000
 
-    # room for future: tool calls, response format, etc.
     extra: Dict[str, Any] = Field(default_factory=dict)
 
 
@@ -30,6 +31,8 @@ class Usage(BaseModel):
 
 
 class GenerateResponse(BaseModel):
+    model_config = ConfigDict(protected_namespaces=())
+
     provider: str
     model_used: str
     output_text: str
