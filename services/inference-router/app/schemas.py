@@ -38,3 +38,13 @@ class GenerateResponse(BaseModel):
     output_text: str
     usage: Usage
     latency_ms: int
+
+
+class ErrorResponse(BaseModel):
+    request_id: Optional[str] = None
+    error: str
+    provider_attempted: Optional[str] = None
+    fallback_attempted: bool = False
+    fallback_provider: Optional[str] = None
+    failure_stage: str
+    detail: str

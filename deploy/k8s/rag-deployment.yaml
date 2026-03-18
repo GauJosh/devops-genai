@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: localhost/rag-service:local
+          image: localhost/rag-service:1.0.1
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

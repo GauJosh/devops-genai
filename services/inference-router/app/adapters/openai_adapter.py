@@ -3,21 +3,23 @@ from openai import OpenAI
 from ..schemas import GenerateRequest, GenerateResponse, Usage
 from ..config import OPENAI_API_KEY, OPENAI_MODEL_DEFAULT
 
-_client = OpenAI(api_key=OPENAI_API_KEY)
-
-
-def _estimate_cost_usd(model: str, input_tokens: int, output_tokens: int) -> float:
-    pricing = {
-        "gpt-4o-mini": {"input": 0.15, "output": 0.60},
-    }
-    p = pricing.get(model)
-    if not p:
-        return 0.0
-    return (input_tokens / 1_000_000) * p["input"] + (output_tokens / 1_000_000) * p["output"]
-
 
 class OpenAIAdapter:
     provider = "openai"
+
+    def __init__(self):
+        if not OPENAI_API_KEY:
+            raise ValueError("OPENAI_API_KEY is not set")
+        self._client = OpenAI(api_key=OPENAI_API_KEY)
+
+    def _estimate_cost_usd(self, model: str, input_tokens: int, output_tokens: int) -> float:
+        pricing = {
+            "gpt-4o-mini": {"input": 0.15, "output": 0.60},
+        }
+        p = pricing.get(model)
+        if not p:
+            return 0.0
+        return (input_tokens / 1_000_000) * p["input"] + (output_tokens / 1_000_000) * p["output"]
 
     def generate(self, req: GenerateRequest) -> GenerateResponse:
         model = req.model_hint or OPENAI_MODEL_DEFAULT
@@ -25,7 +27,7 @@ class OpenAIAdapter:
 
         messages = [{"role": m.role, "content": m.content} for m in req.messages]
 
-        resp = _client.chat.completions.create(
+        resp = self._client.chat.completions.create(
             model=model,
             messages=messages,
             temperature=req.temperature,
@@ -40,7 +42,7 @@ class OpenAIAdapter:
         input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
         output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
 
-        cost = _estimate_cost_usd(model, input_tokens, output_tokens)
+        cost = self._estimate_cost_usd(model, input_tokens, output_tokens)
 
         return GenerateResponse(
             provider=self.provider,

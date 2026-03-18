@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: inference-router
-          image: localhost/inference-router:local
+          image: localhost/inference-router:1.0.1
           imagePullPolicy: IfNotPresent
           env:
             - name: OPENAI_API_KEY
@@ -25,6 +25,12 @@ spec:
                   key: OPENAI_API_KEY
             - name: OPENAI_MODEL_DEFAULT
               value: "gpt-4o-mini"
+            - name: ROUTER_DEFAULT_PROVIDER
+              value: "openai"
+            - name: ROUTER_ENABLE_FALLBACK
+              value: "false"
+            - name: ROUTER_FALLBACK_PROVIDER
+              value: ""
           ports:
             - containerPort: 8000
           readinessProbe:
