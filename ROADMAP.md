@@ -24,13 +24,13 @@ The platform is designed in layers:
 
 Client  
 ↓  
-API Layer  
+API Layer / RAG Service  
 ↓  
 Inference Router  
 ↓  
-Model Adapters (OpenAI / Local / Azure)  
+Model Adapters (OpenAI / Mock / Local / Azure)  
 ↓  
-Model Serving Layer (Ollama / vLLM / API)  
+Model Serving Layer (API / Ollama / vLLM)  
 ↓  
 Compute (CPU / GPU)
 
@@ -52,7 +52,7 @@ Each layer is isolated and replaceable.
 - [x] Context injection strategy  
 - [x] Prompt templating  
 - [ ] Prompt versioning  
-- [ ] Response citations  
+- [x] Response citations  
 - [x] Evaluation harness (golden prompts)  
 
 ## Cost & Usage Awareness
@@ -108,17 +108,22 @@ Each layer is isolated and replaceable.
 
 ## Inference Router Layer (Critical)
 
-- [ ] Dedicated inference-router service  
-- [ ] Multi-model routing strategy  
-- [ ] Fallback logic  
+- [x] Dedicated inference-router service  
+- [x] Multi-model routing strategy  
+- [x] Fallback logic  
 - [ ] Timeout & retry policies  
 - [ ] Model selection heuristics  
 - [ ] Traffic shadowing experiments  
+- [x] Request-driven routing via `model_hint`  
+- [x] Provider abstraction (OpenAI + Mock)  
+- [x] Request ID propagation across services  
+- [x] Structured failure handling  
 
-## Local Model Serving
+## Local / Alternate Model Serving
 
 - [ ] Run Ollama locally  
 - [ ] Benchmark latency vs OpenAI API  
+- [ ] Add real local-model adapter (Ollama)  
 - [ ] Run vLLM locally  
 - [ ] Compare CPU vs GPU inference behavior  
 - [ ] Concurrency stress testing  
@@ -143,18 +148,20 @@ Each layer is isolated and replaceable.
 
 **Goal:** Operate AI like real infrastructure.
 
-- [ ] Structured JSON logs  
-- [ ] p95 / p99 latency tracking  
-- [ ] Token throughput metrics  
-- [ ] Prometheus integration  
+- [x] Structured JSON logs  
+- [x] p95 latency tracking  
+- [ ] p99 latency tracking  
+- [x] Token throughput metrics  
+- [x] Prometheus integration  
 - [ ] OpenTelemetry tracing  
-- [ ] Correlation IDs  
+- [x] Correlation IDs / request IDs  
 - [ ] Retrieval quality logging  
 - [ ] Prompt regression detection  
-- [ ] Cost per endpoint dashboard  
+- [x] Cost dashboard (derived from token metrics + request accounting)  
 - [ ] GPU utilization metrics (simulated if needed)  
 - [ ] Capacity planning documentation  
 - [ ] Throughput math modeling  
+- [x] Grafana dashboard for traffic / latency / tokens / cost / reliability  
 
 ---
 
@@ -238,14 +245,39 @@ Each layer is isolated and replaceable.
 
 # Repository Structure Target
 
-- `core/` – Framework-agnostic logic  
-- `adapters/` – OpenAI / Azure / local model adapters  
-- `rag/` – Chunking, embedding, retrieval  
-- `agents/` – Agent implementations  
-- `api/` – FastAPI endpoints  
-- `deploy/` – Docker, Kubernetes manifests, Helm  
-- `observability/` – Metrics, tracing, logging utilities  
-- `infra/` – Terraform (cloud translation)  
+- `services/rag-service/` – public API, retrieval, prompt assembly, embedding path  
+- `services/inference-router/` – routing, provider adapters, fallback, inference metrics  
+- `deploy/` – Kubernetes manifests and future Helm  
+- `eval/` – evaluation harness  
+- `docs/` – architecture and routing docs  
+- `infra/` – future Terraform / cloud translation  
+
+---
+
+# Current Milestone Summary
+
+Completed platform milestones:
+
+- RAG service deployed on Kubernetes
+- Dedicated inference-router service
+- OpenAI provider integration
+- Mock fallback provider integration
+- Request-driven model routing via `model_hint`
+- Structured logs across services
+- Cross-service request tracing
+- Prometheus metrics on inference-router
+- Grafana dashboard for traffic, latency, reliability, tokens, and cost
+- Fallback behavior tested with controlled primary-model failure
+
+---
+
+# Near-Term Next Steps
+
+1. Add Ollama as a real second provider  
+2. Compare OpenAI vs local-model latency/cost behavior  
+3. Add timeout + retry policy in router  
+4. Add load testing and throughput analysis  
+5. Document routing policy and architecture screenshots in README  
 
 ---
 
@@ -256,6 +288,7 @@ This project demonstrates:
 - Deep RAG internals understanding  
 - Inference system architecture design  
 - Multi-model routing capability  
+- Fallback and graceful degradation patterns  
 - LLM serving infrastructure knowledge  
 - Kubernetes-native AI deployment  
 - Observability-first AI engineering  
