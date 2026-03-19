@@ -8,7 +8,6 @@ class MockAdapter:
     def generate(self, req: GenerateRequest) -> GenerateResponse:
         model = "mock-fast"
 
-        # Simulate a faster, cheaper model
         time.sleep(0.2)
 
         user_text = ""

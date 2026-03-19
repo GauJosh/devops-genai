@@ -1,0 +1,24 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: ollama-model-pull
+  namespace: devops-genai
+spec:
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: pull-model
+          image: curlimages/curl:8.9.1
+          command:
+            - sh
+            - -c
+            - |
+              echo "Waiting for Ollama API..."
+              until curl -s http://ollama:11434/api/tags > /dev/null; do
+                sleep 5
+              done
+              echo "Pulling model..."
+              curl -s http://ollama:11434/api/pull \
+                -d '{"name":"llama3.2:1b","stream":false}' \
+                -H 'Content-Type: application/json'

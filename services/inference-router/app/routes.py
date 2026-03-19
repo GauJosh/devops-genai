@@ -5,10 +5,12 @@ from fastapi import APIRouter, HTTPException
 from .schemas import GenerateRequest, GenerateResponse, ErrorResponse
 from .adapters.openai_adapter import OpenAIAdapter
 from .adapters.mock_adapter import MockAdapter
+from .adapters.ollama_adapter import OllamaAdapter
 from .config import (
     ROUTER_DEFAULT_PROVIDER,
     ROUTER_ENABLE_FALLBACK,
     ROUTER_FALLBACK_PROVIDER,
+    OLLAMA_DEFAULT_MODEL,
 )
 from .metrics import (
     INFERENCE_REQUESTS_TOTAL,
@@ -30,6 +32,8 @@ def get_adapter(provider_name: str):
         return OpenAIAdapter()
     if provider_name == "mock":
         return MockAdapter()
+    if provider_name == "ollama":
+        return OllamaAdapter()
     raise ValueError(f"Unsupported provider: {provider_name}")
 
 
@@ -41,6 +45,14 @@ def choose_primary_provider(req: GenerateRequest) -> str:
 
     if model_hint.startswith("gpt"):
         return "openai"
+
+    # Route llama/phi/mistral/qwen/gemma or exact default ollama model to ollama
+    ollama_prefixes = ("llama", "phi", "mistral", "qwen", "gemma")
+    if model_hint.startswith(ollama_prefixes):
+        return "ollama"
+
+    if model_hint == OLLAMA_DEFAULT_MODEL.lower():
+        return "ollama"
 
     return ROUTER_DEFAULT_PROVIDER
 
