@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: localhost/rag-service:1.0.7
+          image: localhost/rag-service:1.0.9
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -44,6 +44,8 @@ spec:
             value: "/data/chroma_db"
           - name: OPENAI_MODEL
             value: "gpt-4o-mini"
+          - name: INFERENCE_TIMEOUT_S
+            value: "150"
           readinessProbe:
             httpGet:
               path: /healthz

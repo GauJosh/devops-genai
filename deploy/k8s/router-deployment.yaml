@@ -19,7 +19,7 @@ spec:
     spec:
       containers:
         - name: inference-router
-          image: localhost/inference-router:1.0.7
+          image: localhost/inference-router:1.0.9
           imagePullPolicy: IfNotPresent
           env:
             - name: OPENAI_API_KEY
@@ -34,7 +34,7 @@ spec:
             - name: ROUTER_ENABLE_FALLBACK
               value: "true"
             - name: ROUTER_FALLBACK_PROVIDER
-              value: "ollama"
+              value: "mock"
             - name: OLLAMA_BASE_URL
               value: "http://ollama:11434"
             - name: OLLAMA_DEFAULT_MODEL

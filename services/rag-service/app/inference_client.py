@@ -3,7 +3,7 @@ import requests
 from typing import List, Dict, Any, Optional
 
 INFERENCE_ROUTER_URL = os.getenv("INFERENCE_ROUTER_URL", "http://inference-router:8000")
-INFERENCE_TIMEOUT_S = float(os.getenv("INFERENCE_TIMEOUT_S", "30"))
+INFERENCE_TIMEOUT_S = float(os.getenv("INFERENCE_TIMEOUT_S", "150"))
 
 
 def generate_via_router(
