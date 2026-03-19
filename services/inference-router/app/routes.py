@@ -1,7 +1,9 @@
 import json
 import logging
 import time
+import requests
 from fastapi import APIRouter, HTTPException
+from openai import APIConnectionError, APITimeoutError, InternalServerError, RateLimitError
 from .schemas import GenerateRequest, GenerateResponse, ErrorResponse
 from .adapters.openai_adapter import OpenAIAdapter
 from .adapters.mock_adapter import MockAdapter
@@ -26,6 +28,8 @@ logger = logging.getLogger("inference-router")
 if not logger.handlers:
     logging.basicConfig(level=logging.INFO)
 
+MAX_PRIMARY_RETRIES = 1
+
 
 def get_adapter(provider_name: str):
     if provider_name == "openai":
@@ -46,7 +50,6 @@ def choose_primary_provider(req: GenerateRequest) -> str:
     if model_hint.startswith("gpt"):
         return "openai"
 
-    # Route llama/phi/mistral/qwen/gemma or exact default ollama model to ollama
     ollama_prefixes = ("llama", "phi", "mistral", "qwen", "gemma")
     if model_hint.startswith(ollama_prefixes):
         return "ollama"
@@ -65,6 +68,29 @@ def maybe_choose_fallback_provider(primary_provider: str) -> str | None:
     if ROUTER_FALLBACK_PROVIDER == primary_provider:
         return None
     return ROUTER_FALLBACK_PROVIDER
+
+
+def should_retry(provider_name: str, error: Exception) -> bool:
+    if provider_name != "openai":
+        return False
+
+    transient_openai_errors = (
+        APITimeoutError,
+        APIConnectionError,
+        InternalServerError,
+        RateLimitError,
+    )
+
+    if isinstance(error, transient_openai_errors):
+        return True
+
+    if isinstance(error, requests.exceptions.Timeout):
+        return True
+
+    if isinstance(error, requests.exceptions.ConnectionError):
+        return True
+
+    return False
 
 
 def log_start(req: GenerateRequest):
@@ -105,6 +131,16 @@ def log_primary_failure(req: GenerateRequest, provider_name: str, error: Excepti
     }))
 
 
+def log_retry(req: GenerateRequest, provider_name: str, attempt: int):
+    logger.warning(json.dumps({
+        "event": "inference_retry_attempt",
+        "request_id": req.request_id,
+        "purpose": req.purpose,
+        "provider": provider_name,
+        "retry_attempt": attempt,
+    }))
+
+
 def log_fallback_attempt(req: GenerateRequest, fallback_provider: str):
     logger.info(json.dumps({
         "event": "inference_fallback_attempt",
@@ -129,6 +165,19 @@ def log_fallback_failure(req: GenerateRequest, fallback_provider: str, error: Ex
 def execute_with_provider(req: GenerateRequest, provider_name: str) -> GenerateResponse:
     adapter = get_adapter(provider_name)
     return adapter.generate(req)
+
+
+def execute_primary_with_retry(req: GenerateRequest, provider_name: str) -> GenerateResponse:
+    attempt = 0
+    while True:
+        try:
+            return execute_with_provider(req, provider_name)
+        except Exception as e:
+            if attempt >= MAX_PRIMARY_RETRIES or not should_retry(provider_name, e):
+                raise
+            attempt += 1
+            log_retry(req, provider_name, attempt)
+            time.sleep(1)
 
 
 def record_success_metrics(req: GenerateRequest, resp: GenerateResponse):
@@ -182,7 +231,7 @@ def generate(req: GenerateRequest):
     purpose = req.purpose or "unknown"
 
     try:
-        resp = execute_with_provider(req, primary_provider)
+        resp = execute_primary_with_retry(req, primary_provider)
         record_success_metrics(req, resp)
         log_success(req, resp, int((time.time() - t0) * 1000))
         return resp
