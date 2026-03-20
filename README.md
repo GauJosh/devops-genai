@@ -5,6 +5,7 @@
 ![CI/CD Agent](https://img.shields.io/badge/agent-CI%2FCD%20failure%20analysis-purple)
 ![Providers](https://img.shields.io/badge/providers-openai%20%7C%20ollama%20%7C%20mock-orange)
 ![Observability](https://img.shields.io/badge/observability-prometheus%20%2B%20grafana-brightgreen)
+![Deployment](https://img.shields.io/badge/deployment-kubernetes-blue)
 
 Production-style AI platform lab for DevOps workflows with split inference architecture, RAG retrieval, model routing/fallback, and Kubernetes-native deployment patterns.
 
