@@ -1,3 +1,4 @@
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -12,10 +13,6 @@ spec:
     metadata:
       labels:
         app: rag-service
-      # annotations:
-      #   prometheus.io/scrape: "true"
-      #   prometheus.io/port: "8000"
-      #   prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: api
@@ -29,23 +26,23 @@ spec:
             - secretRef:
                 name: devops-genai-secrets
           env:
-          - name: INFERENCE_ROUTER_URL
-            value: "http://inference-router:8000"
-          - name: OPENAI_API_KEY
-            valueFrom:
-              secretKeyRef:
-                name: devops-genai-secrets
-                key: OPENAI_API_KEY
-          - name: OPENAI_MODEL_DEFAULT
-            value: "gpt-4o-mini"
-          - name: OPENAI_EMBED_MODEL
-            value: "text-embedding-3-small"
-          - name: CHROMA_DIR
-            value: "/data/chroma_db"
-          - name: OPENAI_MODEL
-            value: "gpt-4o-mini"
-          - name: INFERENCE_TIMEOUT_S
-            value: "150"
+            - name: INFERENCE_ROUTER_URL
+              value: "http://inference-router:8000"
+            - name: OPENAI_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: devops-genai-secrets
+                  key: OPENAI_API_KEY
+            - name: OPENAI_MODEL_DEFAULT
+              value: "gpt-4o-mini"
+            - name: OPENAI_EMBED_MODEL
+              value: "text-embedding-3-small"
+            - name: CHROMA_DIR
+              value: "/data/chroma_db"
+            - name: OPENAI_MODEL
+              value: "gpt-4o-mini"
+            - name: INFERENCE_TIMEOUT_S
+              value: "150"
           readinessProbe:
             httpGet:
               path: /healthz
@@ -69,6 +66,6 @@ spec:
             - name: chroma-data
               mountPath: /data/chroma_db
       volumes:
-      - name: chroma-data
-        persistentVolumeClaim:
-          claimName: chroma-pvc
+        - name: chroma-data
+          persistentVolumeClaim:
+            claimName: chroma-pvc

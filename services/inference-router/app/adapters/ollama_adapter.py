@@ -26,7 +26,7 @@ class OllamaAdapter:
             },
         }
 
-        resp = requests.post(
+        resp = requests.post(  # nosec B113
             f"{OLLAMA_BASE_URL}/api/generate",
             json=payload,
             timeout=req.timeout_ms / 1000.0,

@@ -163,7 +163,19 @@ def add_cost(endpoint: str, model: str, kind: str, amount_usd: float):
 # ---------------------------
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 
-chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
+try:
+    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
+except Exception as exc:
+    fallback_chroma_dir = os.getenv("CHROMA_DIR_FALLBACK", "/tmp/chroma_db")
+    logger.warning(
+        "Failed to initialize Chroma at CHROMA_DIR=%s (%s). Falling back to %s",
+        CHROMA_DIR,
+        exc,
+        fallback_chroma_dir,
+    )
+    os.makedirs(fallback_chroma_dir, exist_ok=True)
+    chroma_client = chromadb.PersistentClient(path=fallback_chroma_dir)
+
 collection = chroma_client.get_or_create_collection(name="devops_knowledge")
 
 
