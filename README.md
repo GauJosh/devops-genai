@@ -1,5 +1,6 @@
 # DevOps GenAI Platform
 
+[![CI](https://github.com/GauJosh/devops-genai/actions/workflows/ci.yml/badge.svg)](https://github.com/GauJosh/devops-genai/actions/workflows/ci.yml)
 ![Status](https://img.shields.io/badge/status-active-success)
 ![Architecture](https://img.shields.io/badge/architecture-RAG%20%2B%20Inference%20Router-blue)
 ![CI/CD Agent](https://img.shields.io/badge/agent-CI%2FCD%20failure%20analysis-purple)
