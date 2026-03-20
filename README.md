@@ -1,6 +1,14 @@
 # DevOps GenAI Platform
 
+![Status](https://img.shields.io/badge/status-active-success)
+![Architecture](https://img.shields.io/badge/architecture-RAG%20%2B%20Inference%20Router-blue)
+![CI/CD Agent](https://img.shields.io/badge/agent-CI%2FCD%20failure%20analysis-purple)
+![Providers](https://img.shields.io/badge/providers-openai%20%7C%20ollama%20%7C%20mock-orange)
+![Observability](https://img.shields.io/badge/observability-prometheus%20%2B%20grafana-brightgreen)
+
 Production-style AI platform lab for DevOps workflows with split inference architecture, RAG retrieval, model routing/fallback, and Kubernetes-native deployment patterns.
+
+This project also includes CI/CD failure-analysis agent capabilities with metadata-aware log ingestion and focused operational response mode.
 
 ## Architecture Diagram
 
@@ -8,10 +16,10 @@ Production-style AI platform lab for DevOps workflows with split inference archi
 
 ## What’s in this workspace
 
-- `rag-service`: public API for ingest/retrieve/ask/chat and in-memory cost aggregation.
-- `inference-router`: internal generation gateway with provider abstraction (`openai`, `mock`), fallback logic, JSON logs, and Prometheus metrics.
+- `rag-service`: public API for ingest/retrieve/ask/chat, dedicated CI/CD log ingestion, and in-memory cost aggregation.
+- `inference-router`: internal generation gateway with provider abstraction (`openai`, `ollama`, `mock`), fallback logic, retries, JSON logs, and Prometheus metrics.
 - `deploy/k8s`: namespace, config, secret, deployments, services, PVC, and HPAs.
-- `dashboard`: Grafana dashboards (`v1`, `v2`) for request, latency, token, and failure visibility.
+- `dashboard`: Grafana dashboards (`v1`, `v2`, `v3`) plus screenshot galleries for observability and CI/CD analysis scenarios.
 - `eval`: golden prompt harness for regression checks (`eval/run_eval.py`, `eval/golden.json`).
 - `docs`: architecture and routing design notes.
 - `app.py`: legacy monolith prototype kept for reference.
@@ -25,8 +33,15 @@ devops-genai/
 ├── requests.http
 ├── ROADMAP.md
 ├── dashboard/
+│   ├── grafana-dashboard-1.jpg
+│   ├── grafana-dashboard-2.jpg
+│   ├── grafana-dashboard-3.jpg
 │   ├── grafana-dashboard-v1.json
 │   └── grafana-dashboard-v2.json
+│   ├── grafana-dashboard-v3.json
+│   ├── response-scenario-1.jpg
+│   ├── response-scenario-2.jpg
+│   └── response-scenario-3.jpg
 ├── deploy/k8s/
 │   ├── namespace.yaml
 │   ├── configmap.yaml
@@ -63,6 +78,14 @@ devops-genai/
 3. Generates embeddings (`text-embedding-3-small`).
 4. Stores chunks + metadata in ChromaDB.
 
+### 1.1) CI/CD Log Ingestion (`rag-service`)
+1. Accepts CI/CD logs via `/ingest-log`.
+2. Forces `content_type="logs"` and defaults source to `cicd` when missing.
+3. Persists CI/CD metadata fields for filtered retrieval:
+    - `repo`, `pipeline`, `environment`, `status`, `workflow`, `service_name`
+
+This enables targeted incident queries like: “show failed deploy logs for `payments-api` in `dev`.”
+
 ### 2) Retrieval + Answer (`/ask`)
 1. Embeds the question.
 2. Retrieves top-k chunks from ChromaDB with optional metadata filters.
@@ -70,11 +93,32 @@ devops-genai/
 4. Calls `inference-router` (`/v1/generate`).
 5. Returns answer, retrieved chunks, token usage, and endpoint cost fields.
 
+### 2.1) CI/CD Analysis Mode (`/ask` with `analysis_mode="cicd"`)
+- Uses CI/CD-specific system prompt and response template.
+- Separates immediate failure from likely underlying cause.
+- Produces concise, operations-first output with:
+    - `Immediate Failure`
+    - `Likely Underlying Cause`
+    - `Evidence`
+    - `First 3 Checks`
+    - `Suggested Fix`
+    - `Confidence`
+
 ### 3) Inference Routing (`inference-router`)
 - `model_hint` starts with `gpt*` → `openai` adapter.
+- `model_hint` starts with `llama*`, `phi*`, `mistral*`, `qwen*`, `gemma*` → `ollama` adapter.
 - `model_hint` starts with `mock*` → `mock` adapter.
+- `model_hint == OLLAMA_DEFAULT_MODEL` → `ollama` adapter.
 - Otherwise → `ROUTER_DEFAULT_PROVIDER`.
 - On primary failure, router optionally retries with `ROUTER_FALLBACK_PROVIDER` when enabled.
+
+## Model Support
+
+| Provider | Status | Notes |
+|---|---|---|
+| OpenAI | ✅ Supported | Default cloud inference path (`gpt*` model hints). |
+| Ollama | ✅ Supported | Local inference via `OLLAMA_BASE_URL` and `OLLAMA_DEFAULT_MODEL`. |
+| Mock | ✅ Supported | Lightweight fallback/testing provider (`mock*` hints). |
 
 ## API Endpoints
 
@@ -82,6 +126,7 @@ devops-genai/
 - `GET /healthz`
 - `POST /chat`
 - `POST /ingest`
+- `POST /ingest-log`
 - `POST /ask`
 - `GET /sources`
 - `GET /ingested`
@@ -113,6 +158,9 @@ OPENAI_MODEL=gpt-4o-mini
 OPENAI_MODEL_DEFAULT=gpt-4o-mini
 OPENAI_EMBED_MODEL=text-embedding-3-small
 CHROMA_DIR=./chroma_db
+
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_DEFAULT_MODEL=llama3.2:1b
 
 ROUTER_DEFAULT_PROVIDER=openai
 ROUTER_ENABLE_FALLBACK=true
@@ -146,6 +194,43 @@ uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
 Use the `requests.http` file for quick endpoint testing.
+
+### CI/CD quickstart
+
+Ingest CI/CD logs with metadata:
+
+```bash
+curl -X POST http://localhost:8000/ingest-log \
+    -H "Content-Type: application/json" \
+    -d '{
+        "source": "github-actions",
+        "text": "<paste your failed pipeline logs here>",
+        "repo": "payments-api",
+        "pipeline": "deploy",
+        "environment": "dev",
+        "status": "failed",
+        "workflow": "deploy.yml",
+        "service_name": "payments-api"
+    }'
+```
+
+Run CI/CD failure analysis:
+
+```bash
+curl -X POST http://localhost:8000/ask \
+    -H "Content-Type: application/json" \
+    -d '{
+        "question": "Why did this deployment fail and what should I check first?",
+        "top_k": 5,
+        "source": "github-actions",
+        "repo": "payments-api",
+        "pipeline": "deploy",
+        "environment": "dev",
+        "status": "failed",
+        "analysis_mode": "cicd",
+        "model_hint": "gpt-4o-mini"
+    }'
+```
 
 ## Docker
 
@@ -197,6 +282,34 @@ Notes:
 ### Dashboards
 - `dashboard/grafana-dashboard-v1.json`
 - `dashboard/grafana-dashboard-v2.json`
+- `dashboard/grafana-dashboard-v3.json`
+
+### Grafana dashboard links
+- Local Grafana home: [http://localhost:3000](http://localhost:3000)
+- Suggested dashboard path after import: [http://localhost:3000/dashboards](http://localhost:3000/dashboards)
+- JSON: [Dashboard V1](dashboard/grafana-dashboard-v1.json)
+- JSON: [Dashboard V2](dashboard/grafana-dashboard-v2.json)
+- JSON: [Dashboard V3](dashboard/grafana-dashboard-v3.json)
+
+### Dashboard gallery
+
+| Dashboard View 1 | Dashboard View 2 | Dashboard View 3 |
+|---|---|---|
+| ![Grafana Dashboard 1](dashboard/grafana-dashboard-1.jpg) | ![Grafana Dashboard 2](dashboard/grafana-dashboard-2.jpg) | ![Grafana Dashboard 3](dashboard/grafana-dashboard-3.jpg) |
+
+## CI/CD Failure Analysis Agent
+
+This project now supports a CI/CD-focused analysis workflow that combines:
+- log-first retrieval
+- metadata-scoped filtering
+- operational response formatting
+- evidence-backed recommendations with citations
+
+### Response scenarios
+
+| Scenario 1 | Scenario 2 | Scenario 3 |
+|---|---|---|
+| ![CI/CD Response Scenario 1](dashboard/response-scenario-1.jpg) | ![CI/CD Response Scenario 2](dashboard/response-scenario-2.jpg) | ![CI/CD Response Scenario 3](dashboard/response-scenario-3.jpg) |
 
 ## Evaluation Harness
 
@@ -222,5 +335,6 @@ python eval/run_eval.py eval/golden.json
 
 - `OPENAI_API_KEY not set`: provide key in `.env` (local) or `deploy/k8s/secret.yaml` (K8s).
 - `/ask` returns “Insufficient context”: ingest relevant docs/logs first via `/ingest`.
+- CI/CD query returns weak/no evidence: use `/ingest-log` and include matching metadata (`repo`, `pipeline`, `environment`, `status`).
 - Router 502 errors: inspect router logs for primary/fallback failure events.
 - No autoscaling in cluster: verify metrics-server is installed for HPA.
