@@ -13,7 +13,7 @@ This project also includes CI/CD failure-analysis agent capabilities with metada
 
 ## Architecture Diagram
 
-![DevOps GenAI Architecture](docs/architecture_diagram_02.png)
+![DevOps GenAI Architecture](images/devops-genai.jpg)
 
 ## What’s in this workspace
 
