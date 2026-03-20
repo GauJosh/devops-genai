@@ -1,0 +1,89 @@
+name: CI - Code Quality, Security, and Standards
+
+on:
+  push:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate-python-services:
+    name: Validate ${{ matrix.service_name }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - service_name: rag-service
+            service_path: services/rag-service
+          - service_name: inference-router
+            service_path: services/inference-router
+
+    defaults:
+      run:
+        shell: bash
+        working-directory: ${{ matrix.service_path }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+          cache-dependency-path: |
+            services/rag-service/requirements.txt
+            services/inference-router/requirements.txt
+
+      - name: Install dependencies + tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install ruff==0.11.13 bandit[toml]==1.8.3 pip-audit==2.8.0
+
+      - name: Lint (ruff)
+        run: ruff check app
+
+      - name: Security scan (bandit)
+        run: bandit -r app -ll
+
+      - name: Compile check (syntax)
+        run: python -m compileall -q app
+
+      - name: Import smoke test
+        run: python -c "from app.main import app; print(app.title)"
+
+      - name: Dependency consistency
+        run: pip check
+
+      - name: Dependency vulnerability audit
+        run: pip-audit --strict
+
+  validate-yaml-manifests:
+    name: Validate YAML Manifests
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Lint Kubernetes and workflow YAML
+        uses: ibiqlik/action-yamllint@v3
+        with:
+          config_data: |
+            extends: default
+            rules:
+              line-length:
+                max: 180
+                level: warning
+              truthy:
+                allowed-values: ["true", "false", "on"]
+          file_or_dir: deploy/k8s .github/workflows
