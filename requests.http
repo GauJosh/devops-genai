@@ -113,3 +113,96 @@ Content-Type: application/json
     "analysis_mode": "cicd",
     "model_hint": "gpt-4o-mini"
 }
+
+### Scenario 1 — CrashLoopBackOff (missing env / config)
+POST http://localhost:18000/ingest-log
+Content-Type: application/json
+
+{
+    "source": "github-actions",
+    "repo": "orders-api",
+    "pipeline": "deploy",
+    "environment": "dev",
+    "status": "failed",
+    "workflow": "deploy-to-aks",
+    "service_name": "orders-api",
+    "text": "Step 8/10: Deploy to AKS\nkubectl apply -f deployment.yaml\nDeployment.apps/orders-api configured\nkubectl rollout status deployment/orders-api\nWaiting for deployment \"orders-api\" rollout to finish: 1 out of 2 new replicas have been updated...\npod/orders-api-6d4f7c9b6f-abcde   0/1     CrashLoopBackOff   3 (10s ago)   45s\nkubectl logs orders-api-6d4f7c9b6f-abcde\nError: missing required environment variable DATABASE_URL\nApplication failed to start"
+  }
+
+### Scenario 1 — Ask about CrashLoopBackOff
+POST http://localhost:18000/ask
+Content-Type: application/json
+
+{
+    "question": "Why is this deployment failing?",
+    "top_k": 5,
+    "source": "github-actions",
+    "repo": "orders-api",
+    "pipeline": "deploy",
+    "environment": "dev",
+    "status": "failed",
+    "analysis_mode": "cicd",
+    "model_hint": "gpt-4o-mini"
+  }
+
+### Scenario 2 — Terraform apply failure (auth issue)
+POST http://localhost:18000/ingest-log
+Content-Type: application/json
+
+{
+    "source": "github-actions",
+    "repo": "infra-live",
+    "pipeline": "terraform-apply",
+    "environment": "prod",
+    "status": "failed",
+    "workflow": "terraform",
+    "service_name": "aks-cluster",
+    "text": "Run terraform apply -auto-approve\nmodule.aks.azurerm_kubernetes_cluster.main: Creating...\n\nError: authorization failed\n\nError: building AzureRM Client: obtain subscription() from Azure CLI: parsing json result from the Azure CLI: waiting for the Azure CLI: exit status 1: ERROR: Please run 'az login' to setup account.\n\n\nError: unable to authenticate to Azure provider\n\non provider.tf line 3, in provider \"azurerm\":\n3: provider \"azurerm\" {"
+  }
+
+### Scenario 2 — Ask about Terraform apply failure
+POST http://localhost:18000/ask
+Content-Type: application/json
+
+  {
+    "question": "Why did terraform apply fail and what should be fixed?",
+    "top_k": 5,
+    "source": "github-actions",
+    "repo": "infra-live",
+    "pipeline": "terraform-apply",
+    "environment": "prod",
+    "status": "failed",
+    "analysis_mode": "cicd",
+    "model_hint": "gpt-4o-mini"
+  }
+
+### Scenario 3 — GitHub Actions build/push failure (image not found / tag mismatch)
+POST http://localhost:18000/ingest-log
+Content-Type: application/json
+
+{
+    "source": "github-actions",
+    "repo": "payments-api",
+    "pipeline": "build",
+    "environment": "dev",
+    "status": "failed",
+    "workflow": "docker-build",
+    "service_name": "payments-api",
+    "text": "Step 5/8: Build Docker image\nSuccessfully built 9f8a1c2\nStep 6/8: Tag image\nTagging image as registry.example.com/payments-api:latest\nStep 7/8: Push image\nThe push refers to repository [registry.example.com/payments-api]\ndenied: requested access to the resource is denied\nError: failed to push image\n\nError: process completed with exit code 1"
+  }
+
+### Scenario 3 — Ask about GitHub Actions build/push failure
+POST http://localhost:18000/ask
+Content-Type: application/json
+
+{
+    "question": "Why did the build pipeline fail?",
+    "top_k": 5,
+    "source": "github-actions",
+    "repo": "payments-api",
+    "pipeline": "build",
+    "environment": "dev",
+    "status": "failed",
+    "analysis_mode": "cicd",
+    "model_hint": "gpt-4o-mini"
+  }
