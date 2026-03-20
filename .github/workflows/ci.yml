@@ -88,4 +88,3 @@ jobs:
               truthy:
                 allowed-values: ["true", "false", "on"]
           file_or_dir: deploy/k8s .github/workflows
-
