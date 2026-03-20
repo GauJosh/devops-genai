@@ -5,6 +5,7 @@ import threading
 import hashlib
 import json
 import logging
+import tempfile
 from collections import defaultdict
 from typing import List, Optional, Literal, Dict, Any, Tuple
 
@@ -166,7 +167,8 @@ client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
 try:
     chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
 except Exception as exc:
-    fallback_chroma_dir = os.getenv("CHROMA_DIR_FALLBACK", "/tmp/chroma_db")
+    default_fallback_chroma_dir = os.path.join(tempfile.gettempdir(), "chroma_db")
+    fallback_chroma_dir = os.getenv("CHROMA_DIR_FALLBACK", default_fallback_chroma_dir)
     logger.warning(
         "Failed to initialize Chroma at CHROMA_DIR=%s (%s). Falling back to %s",
         CHROMA_DIR,
