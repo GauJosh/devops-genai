@@ -12,14 +12,14 @@ spec:
     metadata:
       labels:
         app: rag-service
-      annotations:
-        prometheus.io/scrape: "true"
-        prometheus.io/port: "8000"
-        prometheus.io/path: "/metrics"
+      # annotations:
+      #   prometheus.io/scrape: "true"
+      #   prometheus.io/port: "8000"
+      #   prometheus.io/path: "/metrics"
     spec:
       containers:
         - name: api
-          image: localhost/rag-service:1.0.10
+          image: localhost/rag-service:1.0.11
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000

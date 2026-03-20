@@ -80,3 +80,36 @@ Content-Type: application/json
     "top_k": 3,
     "model_hint": "bad-model-name"
 }
+
+### Ingest pipeline log with full metadata
+POST http://localhost:18000/ingest-log
+Content-Type: application/json
+
+{
+    "source": "github-actions",
+    "repo": "payments-api",
+    "pipeline": "deploy",
+    "environment": "dev",
+    "status": "failed",
+    "workflow": "build-and-deploy",
+    "service_name": "payments-api",
+    "text": "Step 7/10: Deploy to cluster\nkubectl apply -f deploy.yaml\nError from server (BadRequest): container \"api\" in pod \"payments-api\" is waiting to start: trying and failing to pull image\nBack-off pulling image \"registry.example.com/payments-api:abc123\""
+}
+
+### Ask pipeline log with full metadata
+POST http://localhost:18000/ask
+Content-Type: application/json
+
+{
+    "question": "Why did this deployment fail and what should I check first?",
+    "top_k": 5,
+    "source": "github-actions",
+    "repo": "payments-api",
+    "pipeline": "deploy",
+    "environment": "dev",
+    "status": "failed",
+    "workflow": "build-and-deploy",
+    "service_name": "payments-api",
+    "analysis_mode": "cicd",
+    "model_hint": "gpt-4o-mini"
+}

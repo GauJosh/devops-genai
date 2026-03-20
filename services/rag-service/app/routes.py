@@ -67,6 +67,50 @@ Rules:
 - Do not claim certainty without evidence.
 """
 
+CICD_SYSTEM_PROMPT = (
+    "You are a senior DevOps and platform engineer.\n"
+    "Analyze CI/CD and deployment failures using the provided logs and retrieved context.\n"
+    "Prioritize concrete evidence from logs.\n"
+    "Do not invent facts that are not supported by the context.\n"
+    "If uncertain, clearly say what is uncertain.\n"
+    "Always include citations like [1], [2] when referencing context.\n"
+    "Focus on:\n"
+    "- likely root cause\n"
+    "- evidence from logs\n"
+    "- most likely fix\n"
+    "- next checks to run\n"
+)
+
+CICD_RAG_TEMPLATE = """PROMPT_VERSION={prompt_version}
+
+CONTEXT (with citations):
+{context}
+
+QUESTION:
+{question}
+
+RESPONSE FORMAT (use headings exactly):
+Root Cause:
+- 1-2 bullets.
+
+Evidence from logs:
+- Bullet points, each with citation(s).
+
+Most Likely Fix:
+- Bullet points.
+
+Next Checks:
+- Bullet points.
+
+Confidence:
+- High / Medium / Low with one sentence.
+
+Rules:
+- If you reference context, include citations.
+- Prefer log evidence over guesses.
+- If uncertain, say so clearly.
+"""
+
 # ---------------------------
 # Pricing + cost tracking
 # ---------------------------
@@ -123,6 +167,14 @@ class IngestRequest(BaseModel):
     chunk_size: int = Field(default=1200, ge=200, le=4000)
     chunk_overlap: int = Field(default=150, ge=0, le=1000)
 
+    # Optional metadata for CI/CD and operational analysis
+    repo: Optional[str] = None
+    pipeline: Optional[str] = None
+    environment: Optional[str] = None
+    status: Optional[str] = None
+    workflow: Optional[str] = None
+    service_name: Optional[str] = None
+
 
 class IngestedItem(BaseModel):
     id: str
@@ -131,6 +183,12 @@ class IngestedItem(BaseModel):
     content_type: str
     chunk_index: int
     text: str
+    repo: Optional[str] = None
+    pipeline: Optional[str] = None
+    environment: Optional[str] = None
+    status: Optional[str] = None
+    workflow: Optional[str] = None
+    service_name: Optional[str] = None
 
 
 class AskRequest(BaseModel):
@@ -140,6 +198,17 @@ class AskRequest(BaseModel):
     content_type: Optional[Literal["logs", "docs"]] = None
     source: Optional[str] = None
     model_hint: Optional[str] = None
+
+    # Optional retrieval filters
+    repo: Optional[str] = None
+    pipeline: Optional[str] = None
+    environment: Optional[str] = None
+    status: Optional[str] = None
+    workflow: Optional[str] = None
+    service_name: Optional[str] = None
+
+    # Analysis mode
+    analysis_mode: Optional[Literal["general", "cicd"]] = "general"
 
 
 class RetrievedChunk(BaseModel):
@@ -356,7 +425,18 @@ def ingest(req: IngestRequest):
 
     ids = [f"{doc_id}_{i}" for i in range(len(chunks))]
     metadatas = [
-        {"doc_id": doc_id, "source": req.source, "content_type": req.content_type, "chunk_index": i}
+        {
+            "doc_id": doc_id,
+            "source": req.source,
+            "content_type": req.content_type,
+            "chunk_index": i,
+            "repo": req.repo or "",
+            "pipeline": req.pipeline or "",
+            "environment": req.environment or "",
+            "status": req.status or "",
+            "workflow": req.workflow or "",
+            "service_name": req.service_name or "",
+        }
         for i in range(len(chunks))
     ]
 
@@ -375,6 +455,24 @@ def ingest(req: IngestRequest):
     )
 
 
+@router.post("/ingest-log", response_model=IngestResponse)
+def ingest_log(req: IngestRequest):
+    log_req = IngestRequest(
+        source=req.source or "cicd",
+        content_type="logs",
+        text=req.text,
+        chunk_size=req.chunk_size,
+        chunk_overlap=req.chunk_overlap,
+        repo=req.repo,
+        pipeline=req.pipeline,
+        environment=req.environment,
+        status=req.status,
+        workflow=req.workflow,
+        service_name=req.service_name,
+    )
+    return ingest(log_req)
+
+
 @router.post("/ask", response_model=AskResponse)
 def ask(req: AskRequest):
     if not client:
@@ -390,6 +488,13 @@ def ask(req: AskRequest):
         "top_k": req.top_k,
         "content_type": req.content_type,
         "source": req.source,
+        "repo": req.repo,
+        "pipeline": req.pipeline,
+        "environment": req.environment,
+        "status": req.status,
+        "workflow": req.workflow,
+        "service_name": req.service_name,
+        "analysis_mode": req.analysis_mode,
         "model_hint": req.model_hint,
     }))
 
@@ -399,11 +504,29 @@ def ask(req: AskRequest):
     embed_cost = cost_usd(EMBED_MODEL, input_tokens=q_embed_tokens, output_tokens=0)
     add_cost(endpoint="/ask", model=EMBED_MODEL, kind="embeddings", amount_usd=embed_cost)
 
-    where = {}
+    where_conditions = []
     if req.content_type:
-        where["content_type"] = req.content_type
+        where_conditions.append({"content_type": req.content_type})
     if req.source:
-        where["source"] = req.source
+        where_conditions.append({"source": req.source})
+    if req.repo:
+        where_conditions.append({"repo": req.repo})
+    if req.pipeline:
+        where_conditions.append({"pipeline": req.pipeline})
+    if req.environment:
+        where_conditions.append({"environment": req.environment})
+    if req.status:
+        where_conditions.append({"status": req.status})
+    if req.workflow:
+        where_conditions.append({"workflow": req.workflow})
+    if req.service_name:
+        where_conditions.append({"service_name": req.service_name})
+
+    where = None
+    if len(where_conditions) == 1:
+        where = where_conditions[0]
+    elif len(where_conditions) > 1:
+        where = {"$and": where_conditions}
 
     query_kwargs = dict(
         query_embeddings=[q_embed],
@@ -471,7 +594,14 @@ def ask(req: AskRequest):
 
     context = "\n\n".join(context_parts)
 
-    user_prompt = RAG_TEMPLATE.format(
+    if req.analysis_mode == "cicd":
+        selected_system_prompt = CICD_SYSTEM_PROMPT
+        selected_template = CICD_RAG_TEMPLATE
+    else:
+        selected_system_prompt = SYSTEM_PROMPT
+        selected_template = RAG_TEMPLATE
+
+    user_prompt = selected_template.format(
         prompt_version=PROMPT_VERSION,
         context=context,
         question=req.question,
@@ -479,7 +609,7 @@ def ask(req: AskRequest):
 
     try:
         messages = [
-            {"role": "system", "content": SYSTEM_PROMPT},
+            {"role": "system", "content": selected_system_prompt},
             {"role": "user", "content": user_prompt},
         ]
 
@@ -590,6 +720,12 @@ def list_ingested(
                 content_type=meta.get("content_type", "unknown"),
                 chunk_index=int(meta.get("chunk_index", -1)),
                 text=doc,
+                repo=meta.get("repo", ""),
+                pipeline=meta.get("pipeline", ""),
+                environment=meta.get("environment", ""),
+                status=meta.get("status", ""),
+                workflow=meta.get("workflow", ""),
+                service_name=meta.get("service_name", ""),
             )
         )
 
