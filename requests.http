@@ -206,3 +206,20 @@ Content-Type: application/json
     "analysis_mode": "cicd",
     "model_hint": "gpt-4o-mini"
   }
+
+### Action workflow logs
+POST http://localhost:18000/ask
+Content-Type: application/json
+
+{
+    "question": "Why did this GitHub Actions workflow fail, what is the likely root cause, and what should I check first?",
+    "top_k": 5,
+    "source": "github-actions",
+    "repo": "cicd-failure-demo",
+    "pipeline": "failing-ci",
+    "environment": "ci",
+    "status": "failed",
+    "workflow": "failing-ci",
+    "analysis_mode": "cicd",
+    "model_hint": "gpt-4o-mini"
+  }
