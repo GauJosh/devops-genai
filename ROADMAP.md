@@ -8,8 +8,7 @@ This repository is a **production-style AI Platform Engineering Lab** designed t
 - Model abstraction & routing
 - Kubernetes-native AI workloads
 - Observability-first LLM systems
-- Cost & capacity modeling
-- Multi-tenant AI gateway patterns
+- CI/CD failure diagnostics using RAG
 - Enterprise translation patterns
 
 The goal is not to build a chatbot.
@@ -21,46 +20,42 @@ The goal is to design, deploy, and reason about **LLM infrastructure as a platfo
 # Architecture Philosophy
 
 The platform is designed in layers:
-
-Client  
+```text
+CI/CD Logs  
 ↓  
-API Layer / RAG Service  
+Ingest API  
 ↓  
-Inference Router  
+Vector DB (embeddings + metadata)  
 ↓  
-Model Adapters (OpenAI / Mock / Local / Azure)  
+RAG Service (retrieval + context assembly)  
 ↓  
-Model Serving Layer (API / Ollama / vLLM)  
+Inference Router (model selection / retry / fallback)  
 ↓  
-Compute (CPU / GPU)
-
+LLM Providers (OpenAI / Mock / future local)  
+↓  
+Observability (Prometheus / Grafana)
+```
 Each layer is isolated and replaceable.
 
 ---
 
-# Phase 1 – Core RAG Engine (Framework-Agnostic)
-
-**Goal:** Understand RAG deeply without framework abstraction.
+# Phase 1 – Core RAG Engine (Complete)
 
 ## RAG Internals
 
-- [x] Document ingestion endpoint  
-- [x] Log-aware & doc-aware chunking strategy  
+- [x] Log ingestion endpoint  
+- [x] Metadata-aware ingestion (repo, pipeline, environment)  
 - [x] Embedding generation  
-- [x] Chroma vector storage  
+- [x] Chroma vector storage (PVC-backed in Kubernetes)  
 - [x] Retrieval logic (top-k + scoring)  
-- [x] Context injection strategy  
-- [x] Prompt templating  
-- [ ] Prompt versioning  
-- [x] Response citations  
-- [x] Evaluation harness (golden prompts)  
+- [x] Context assembly  
+- [x] Prompt templating (structured CI/CD analysis)  
+- [x] Response generation with actionable output  
 
 ## Cost & Usage Awareness
 
 - [x] Token logging  
 - [x] Cost estimation per request  
-- [ ] Usage reporting endpoint  
-- [ ] Prompt version tracking  
 
 ## Data Layer Evolution
 
@@ -71,53 +66,36 @@ Each layer is isolated and replaceable.
 
 ---
 
-# Phase 2 – Kubernetes Platformization
-
-**Goal:** Treat RAG like a production service.
+# Phase 2 – Kubernetes Platformization (Complete)
 
 ## Containerization
 
-- [x] Dockerfile  
-- [ ] Multi-stage optimization  
+- [x] Dockerized services  
 - [x] Environment-based configuration  
 - [x] Secret management pattern  
 
 ## Kubernetes Deployment
 
-- [x] Deployment  
-- [x] Service  
-- [x] ConfigMaps  
-- [x] Secrets  
-- [x] HPA (CPU-based)  
-- [x] Liveness probe  
-- [x] Readiness probe  
+- [x] Deployment + Service  
+- [x] ConfigMaps + Secrets  
+- [x] HPA (basic CPU-based)  
+- [x] Liveness & readiness probes  
 - [x] Resource limits & requests  
-- [ ] Load testing & throughput benchmarks  
-- [ ] Pod disruption budget  
-
-## Infrastructure as Code
-
-- [ ] Helm chart  
-- [ ] Terraform cloud translation skeleton  
+- [x] Persistent storage for vector DB (PVC)  
 
 ---
 
-# Phase 2.5 – Inference Architecture & Model Serving
+# Phase 2.5 – Inference Architecture (Complete)
 
-**Goal:** Move beyond API usage into LLM infrastructure design.
-
-## Inference Router Layer (Critical)
+## Inference Router
 
 - [x] Dedicated inference-router service  
-- [x] Multi-model routing strategy  
-- [x] Fallback logic  
-- [ ] Timeout & retry policies  
-- [ ] Model selection heuristics  
-- [ ] Traffic shadowing experiments  
-- [x] Request-driven routing via `model_hint`  
+- [x] Multi-model routing  
+- [x] Fallback logic (primary → mock)  
+- [x] Request-driven routing (`model_hint`)  
 - [x] Provider abstraction (OpenAI + Mock)  
-- [x] Request ID propagation across services  
 - [x] Structured failure handling  
+- [x] Cross-service request tracing  
 
 ## Local / Alternate Model Serving
 
@@ -140,68 +118,72 @@ Each layer is isolated and replaceable.
 - [ ] Model versioning strategy  
 - [ ] Canary rollout simulation  
 - [ ] Rollback mechanism  
-- [ ] Model performance comparison framework  
+- [ ] Model performance comparison framework
 
 ---
 
-# Phase 3 – Observability & Capacity Engineering
-
-**Goal:** Operate AI like real infrastructure.
+# Phase 3 – Observability (Complete)
 
 - [x] Structured JSON logs  
-- [x] p95 latency tracking  
-- [ ] p99 latency tracking  
-- [x] Token throughput metrics  
-- [x] Prometheus integration  
-- [ ] OpenTelemetry tracing  
-- [x] Correlation IDs / request IDs  
-- [ ] Retrieval quality logging  
-- [ ] Prompt regression detection  
-- [x] Cost dashboard (derived from token metrics + request accounting)  
-- [ ] GPU utilization metrics (simulated if needed)  
-- [ ] Capacity planning documentation  
-- [ ] Throughput math modeling  
-- [x] Grafana dashboard for traffic / latency / tokens / cost / reliability  
+- [x] Prometheus metrics  
+- [x] Token + cost metrics  
+- [x] Latency tracking (p95)  
+- [x] Correlation IDs  
+- [x] Grafana dashboards:
+  - latency
+  - traffic
+  - token usage
+  - cost
+  - failure rate  
 
 ---
 
-# Phase 4 – DevOps AI Applications
+# Phase 4 – CI/CD Failure Analysis (Complete – Core Use Case)
 
-**Goal:** Apply platform capabilities to real DevOps workflows.
+## Implemented
 
-- [ ] Runbook RAG  
-- [ ] Log analyzer endpoint  
-- [ ] CI failure summarizer  
-- [ ] Incident analysis endpoint  
-- [ ] Postmortem draft generator  
-- [ ] GitHub webhook integration  
+- [x] CI/CD log ingestion workflow  
+- [x] RAG-based failure analysis  
+- [x] Structured prompt for root cause + next steps  
+- [x] Support for:
+  - Kubernetes failures (CrashLoopBackOff, image pull issues)
+  - Terraform/provider errors
+  - Registry/auth failures  
+
+This is now the **primary demonstration layer of the platform.**
 
 ---
 
-# Phase 5 – Agent & Tooling Architecture
+# Phase 5 – GitHub Actions Integration (Next)
 
-**Goal:** Structured multi-step automation (not hobby agents).
+**Goal:** Move from synthetic logs → real pipeline failures
 
-## Tool-Calling Architecture
+## Planned
 
-- [ ] Tool abstraction layer  
-- [ ] Deterministic execution wrapper  
-- [ ] Tool permission boundaries  
-- [ ] Tool-call audit logging  
-- [ ] Guardrails evaluation  
+- [ ] Create intentionally failing GitHub Action workflow  
+- [ ] Capture workflow logs using `gh` CLI  
+- [ ] Local ingestion script → `/ingest-log`  
+- [ ] Run `/ask` for automated diagnosis  
+- [ ] Save analysis output for demo  
 
 ## Multi-Agent Workflows
-
 - [ ] Incident triage agent  
 - [ ] Logs analysis agent  
 - [ ] Remediation recommendation agent  
 - [ ] Reporter agent  
 - [ ] Confidence scoring  
-- [ ] Human-in-the-loop approval flow  
+- [ ] Human-in-the-loop approval flow
 
 ---
 
-# Phase 6 – AI Gateway & Multi-Tenancy
+# Phase 6.1 – Inference Expansion (Next)
+
+- [ ] Add Ollama as real secondary provider  
+- [ ] Compare OpenAI vs local model latency  
+- [ ] Add timeout + retry policies  
+- [ ] Basic routing heuristics  
+
+# Phase 6.2 – AI Gateway & Multi-Tenancy
 
 **Goal:** Production-grade enterprise patterns.
 
@@ -213,26 +195,24 @@ Each layer is isolated and replaceable.
 - [ ] Prompt injection mitigation  
 - [ ] Secret redaction checks  
 - [ ] Tool-call allowlist enforcement  
-- [ ] Cost allocation per tenant  
-
----
-
-# Phase 7 – Enterprise Translation
-
-**Goal:** Map local architecture to enterprise cloud patterns.
-
+- [ ] Cost allocation per tenant
 - [ ] Azure OpenAI adapter  
 - [ ] AKS deployment  
 - [ ] Azure Monitor integration  
 - [ ] AAD authentication  
 - [ ] Enterprise cost tracking  
 - [ ] Governance documentation  
-- [ ] Multi-region inference considerations  
+- [ ] Multi-region inference considerations 
 
 ---
 
-# Advanced Topics (Staff-Level Depth)
+# Phase 7 – Platform Hardening (Later)
 
+- [ ] Load testing & throughput benchmarks  
+- [ ] Helm chart  
+- [ ] OpenTelemetry tracing  
+- [ ] Retrieval quality metrics  
+- [ ] Prompt versioning  
 - [ ] Continuous batching (vLLM theory)  
 - [ ] KV cache memory tradeoffs  
 - [ ] GPU scheduling models  
@@ -243,41 +223,44 @@ Each layer is isolated and replaceable.
 
 ---
 
-# Repository Structure Target
+# Phase 8 – Enterprise Translation (Later)
 
-- `services/rag-service/` – public API, retrieval, prompt assembly, embedding path  
-- `services/inference-router/` – routing, provider adapters, fallback, inference metrics  
-- `deploy/` – Kubernetes manifests and future Helm  
+- [ ] Azure OpenAI adapter  
+- [ ] AKS deployment model  
+- [ ] Enterprise auth patterns  
+- [ ] Secure vector store options  
+
+---
+
+# Repository Structure
+
+- `services/rag-service/` – ingestion, retrieval, prompt assembly  
+- `services/inference-router/` – routing, fallback, providers  
+- `deploy/` – Kubernetes manifests  
+- `docs/` – architecture diagrams  
 - `eval/` – evaluation harness  
-- `docs/` – architecture and routing docs  
-- `infra/` – future Terraform / cloud translation  
 
 ---
 
 # Current Milestone Summary
 
-Completed platform milestones:
+## Completed platform milestones:
 
-- RAG service deployed on Kubernetes
-- Dedicated inference-router service
-- OpenAI provider integration
-- Mock fallback provider integration
-- Request-driven model routing via `model_hint`
-- Structured logs across services
-- Cross-service request tracing
-- Prometheus metrics on inference-router
-- Grafana dashboard for traffic, latency, reliability, tokens, and cost
-- Fallback behavior tested with controlled primary-model failure
+- RAG-based CI/CD failure analysis
+- Kubernetes deployment with persistent vector DB
+- Dedicated inference router with fallback
+- Multi-provider abstraction (OpenAI + Mock)
+- Prometheus + Grafana observability
+- Structured prompts producing actionable outputs
 
 ---
 
 # Near-Term Next Steps
 
-1. Add Ollama as a real second provider  
-2. Compare OpenAI vs local-model latency/cost behavior  
-3. Add timeout + retry policy in router  
-4. Add load testing and throughput analysis  
-5. Document routing policy and architecture screenshots in README  
+1. GitHub Actions failure → ingestion → analysis loop  
+2. Add real second provider (Ollama)  
+3. Add retry + timeout policies  
+4. Document architecture + demo flow in README  
 
 ---
 
@@ -285,16 +268,13 @@ Completed platform milestones:
 
 This project demonstrates:
 
-- Deep RAG internals understanding  
-- Inference system architecture design  
-- Multi-model routing capability  
-- Fallback and graceful degradation patterns  
-- LLM serving infrastructure knowledge  
-- Kubernetes-native AI deployment  
-- Observability-first AI engineering  
-- Cost governance & capacity modeling  
-- Enterprise AI platform readiness  
+- RAG applied to real DevOps workflows  
+- Inference system architecture (not just API usage)  
+- Multi-model routing and fallback  
+- Kubernetes-native AI systems  
+- Observability-first LLM engineering  
+- Practical AI for platform engineering  
 
 This is not a GenAI demo.
 
-This is an AI infrastructure engineering lab.
+This is an **AI infrastructure engineering lab.**
