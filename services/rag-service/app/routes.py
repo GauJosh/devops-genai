@@ -198,6 +198,7 @@ class IngestRequest(BaseModel):
     status: Optional[str] = None
     workflow: Optional[str] = None
     service_name: Optional[str] = None
+    run_id: Optional[str] = None
 
 
 class IngestedItem(BaseModel):
@@ -213,7 +214,7 @@ class IngestedItem(BaseModel):
     status: Optional[str] = None
     workflow: Optional[str] = None
     service_name: Optional[str] = None
-
+    run_id: Optional[str] = None
 
 class AskRequest(BaseModel):
     question: str
@@ -230,6 +231,7 @@ class AskRequest(BaseModel):
     status: Optional[str] = None
     workflow: Optional[str] = None
     service_name: Optional[str] = None
+    run_id: Optional[str] = None
 
     # Analysis mode
     analysis_mode: Optional[Literal["general", "cicd"]] = "general"
@@ -460,6 +462,7 @@ def ingest(req: IngestRequest):
             "status": req.status or "",
             "workflow": req.workflow or "",
             "service_name": req.service_name or "",
+            "run_id": req.run_id or "",
         }
         for i in range(len(chunks))
     ]
@@ -545,6 +548,8 @@ def ask(req: AskRequest):
         where_conditions.append({"workflow": req.workflow})
     if req.service_name:
         where_conditions.append({"service_name": req.service_name})
+    if req.run_id:
+        where_conditions.append({"run_id": req.run_id})
 
     where = None
     if len(where_conditions) == 1:
@@ -715,6 +720,7 @@ def list_ingested(
     source: Optional[str] = None,
     content_type: Optional[Literal["logs", "docs"]] = None,
     doc_id: Optional[str] = None,
+    run_id: Optional[str] = None,
 ):
     where = {}
     if source:
@@ -750,6 +756,7 @@ def list_ingested(
                 status=meta.get("status", ""),
                 workflow=meta.get("workflow", ""),
                 service_name=meta.get("service_name", ""),
+                run_id=meta.get("run_id", ""),
             )
         )
 

@@ -51,6 +51,9 @@ Content-Type: application/json
 ### Get costs breakdown
 GET http://localhost:8000/costs
 
+### Get ingested logs
+GET http://localhost:18000/ingested?source=github-actions
+
 ### Model hint gpt-4o-mini
 POST http://localhost:18000/ask
 Content-Type: application/json
@@ -212,14 +215,34 @@ POST http://localhost:18000/ask
 Content-Type: application/json
 
 {
-    "question": "Why did this GitHub Actions workflow fail, what is the likely root cause, and what should I check first?",
+    "question": "Based on the failure log excerpt, what command failed, what is the immediate root cause, and what should be fixed first?",
     "top_k": 5,
+    "min_relevance": 5,
     "source": "github-actions",
-    "repo": "cicd-failure-demo",
+    "repo": "cicd-demo",
     "pipeline": "failing-ci",
     "environment": "ci",
     "status": "failed",
     "workflow": "failing-ci",
     "analysis_mode": "cicd",
-    "model_hint": "gpt-4o-mini"
+    "model_hint": "gpt-4o-mini",
+    "content_type": "logs",
+    "run_id": "23406546568"
   }
+
+### Action workflow ingest log with run id
+POST http://localhost:18000/ingest-log
+Content-Type: application/json
+
+{
+    "source": "github-actions",
+    "repo": "cicd-demo",
+    "pipeline": "failing-ci",
+    "environment": "ci",
+    "status": "failed",
+    "workflow": "failing-ci",
+    "service_name": "demo-app",
+    "content_type": "logs",
+    "run_id": "23406546568",
+    "text": "15:failing-test Run app 2026-03-22T15:43:43.8681669Z SyntaxError: expected ':' \n16:failing-test Run app 2026-03-22T15:43:43.8720320Z ##[error]Process completed with exit code 1."
+}
