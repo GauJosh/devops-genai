@@ -496,6 +496,7 @@ def ingest_log(req: IngestRequest):
         status=req.status,
         workflow=req.workflow,
         service_name=req.service_name,
+        run_id=req.run_id,
     )
     return ingest(log_req)
 

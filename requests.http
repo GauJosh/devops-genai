@@ -246,3 +246,9 @@ Content-Type: application/json
     "run_id": "23406546568",
     "text": "15:failing-test Run app 2026-03-22T15:43:43.8681669Z SyntaxError: expected ':' \n16:failing-test Run app 2026-03-22T15:43:43.8720320Z ##[error]Process completed with exit code 1."
 }
+
+### Check what is ingested
+GET http://localhost:18000/ingested?source=github-actions
+
+### Delete ingested logs
+DELETE http://localhost:18000/delete_source?source=github-actions
