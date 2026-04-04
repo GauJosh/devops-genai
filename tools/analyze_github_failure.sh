@@ -65,6 +65,7 @@ jq -Rs \
     -d @-
 
 echo "Print exact text field sent to curl:"
+echo ""
 jq -Rs \
   --arg source "github-actions" \
   --arg repo_name "cicd-demo" \
@@ -88,13 +89,13 @@ jq -Rs \
     text: .
   }' "$TMP_LOG_FILE" | jq -r '.text'
 
-echo
+echo ""
 echo "==> Asking for analysis..."
 
 curl -sS -X POST "${RAG_BASE_URL}/ask" \
   -H "Content-Type: application/json" \
   -d '{
-    "question": "Based on the failure log excerpt, what command failed, what is the immediate root cause, and what should be fixed first?",
+    "question": "Analyze this CI/CD failure and respond decisively. Identify the failure category, execution context (workflow/pipeline and failing step), immediate failure, one primary diagnosis, and the first fix to apply now. Avoid weak hedging unless evidence is insufficient. For commands, use repo-relative or local-safe paths, not ephemeral CI runner paths. If a file is missing, prefer verify/restore/correct-path guidance over creating an empty placeholder file unless the evidence explicitly shows a new scaffolded file is expected. Use this exact structure: Failure Category, Execution Context, Immediate Failure, Primary Diagnosis, Evidence, Fix First, Fallback if Fix Fails, Top 3 Verifications, Confidence.",
     "top_k": 5,
     "source": "github-actions",
     "repo": "cicd-demo",
@@ -108,4 +109,82 @@ curl -sS -X POST "${RAG_BASE_URL}/ask" \
     "min_relevance": 2.0,
     "run_id": "'"$RUN_ID"'"
   }'|jq -r '.answer'
+echo
+
+echo "==> Suggesting fixes..."
+
+SUGGEST_RESPONSE="$(curl -sS -X POST "${RAG_BASE_URL}/suggest-fix" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "question": "Based on this failure, what are the actionable fixes? Provide one primary diagnosis and 1-3 structured fix suggestions with target files, commands, and safety assessment.",
+    "top_k": 5,
+    "source": "github-actions",
+    "repo": "cicd-demo",
+    "pipeline": "failing-ci",
+    "environment": "ci",
+    "status": "failed",
+    "workflow": "failing-ci",
+    "model_hint": "gpt-4o-mini",
+    "apply_mode": false,
+    "min_relevance": 2.0,
+    "run_id": "'"$RUN_ID"'"
+  }')"
+
+echo "Diagnosis:"
+if echo "$SUGGEST_RESPONSE" | jq empty >/dev/null 2>&1; then
+  echo "$SUGGEST_RESPONSE" | jq -r '.diagnosis // "Unable to determine diagnosis"'
+else
+  echo "Invalid /suggest-fix response"
+  echo "$SUGGEST_RESPONSE"
+  exit 1
+fi
+echo ""
+
+fix_count=$(echo "$SUGGEST_RESPONSE" | jq '.fix_suggestions | length' 2>/dev/null || echo 0)
+if [[ "$fix_count" -gt 0 ]]; then
+  echo "Suggested Fixes:"
+  echo "$SUGGEST_RESPONSE" | jq -r '.fix_suggestions[] |
+    "Category: \((.fix_type // "unknown")
+      | gsub("_"; " ")
+      | split(" ")
+      | map(if length > 0 then (.[0:1] | ascii_upcase) + .[1:] else . end)
+      | join(" "))\n" +
+    "  Confidence: \(.confidence)\n" +
+    "  Safe to Apply: \(.safe_to_apply // "Unknown")\n" +
+    "  Requires Review: \(if .requires_review then "Yes" else "No" end)\n" +
+    "  Target: \(.target_file // "N/A")\n" +
+    "  Change: \(.suggested_change)\n" +
+    "  Why This Fix: \(.why_this_fix // "N/A")\n" +
+    (if (.target_changes // []) | length > 0 then
+      "  Target Changes:\n" + ((.target_changes // []) | map("    - [\(.action // "modify")] \(.file // "unknown") -> \(.reason // "no reason provided")") | join("\n")) + "\n"
+     else ""
+     end) +
+    (if (.evidence_used // []) | length > 0 then
+      "  Evidence Used:\n" + ((.evidence_used // []) | map("    - " + .) | join("\n")) + "\n"
+     else ""
+     end) +
+    (if (.assumptions // []) | length > 0 then
+      "  Assumptions:\n" + ((.assumptions // []) | map("    - " + .) | join("\n")) + "\n"
+     else ""
+     end) +
+    (if (.verification_steps // []) | length > 0 then
+      "  Verification Steps:\n" + ((.verification_steps // []) | map("    - \(.step) [\(.command)] => expected: \(.expected_signal // "N/A")") | join("\n")) + "\n"
+     else ""
+     end) +
+    (if (.alternatives_considered // []) | length > 0 then
+      "  Alternatives Considered:\n" + ((.alternatives_considered // []) | map("    - " + .) | join("\n")) + "\n"
+     else ""
+     end) +
+    (if (.patch_text // "") != "" then
+      "  Patch:\n" + (.patch_text | split("\n") | map("    " + .) | join("\n")) + "\n"
+     else ""
+     end) +
+    (if (.workflow // []) | length > 0 then
+      "  Workflow:\n" + ((.workflow // []) | map("    - \(.step) [\(.command)]") | join("\n")) + "\n"
+     else ""
+     end)
+  '
+else
+  echo "No structured fixes generated."
+fi
 echo
