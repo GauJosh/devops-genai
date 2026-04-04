@@ -157,6 +157,12 @@ FIX_SUGGESTION_SYSTEM_PROMPT = (
     "DIAGNOSIS: <one-sentence root cause>\n"
     "FIXES: [<JSON array of fixes or empty []>]\n"
     "\n"
+    "CRITICAL DISCIPLINE: Workflow/config is ALWAYS a hypothesis to verify FIRST.\n"
+    "For ANY error (missing file, missing dependency, auth failure, timeout, etc),\n"
+    "always include verification steps that check workflow/config BEFORE assuming code/file is wrong.\n"
+    "Do not suggest file creation, code changes, or dependency updates without first verifying\n"
+    "that the workflow/config references are correct.\n"
+    "\n"
     "CRITICAL: Each fix MUST be a JSON object with ALL these fields.\n"
     '- "fix_type": string\n'
     '- "auto_fix_possible": boolean\n'
@@ -168,7 +174,7 @@ FIX_SUGGESTION_SYSTEM_PROMPT = (
     '- "evidence_used": array of strings (specific observed facts from logs/context)\n'
     '- "assumptions": array of strings (can be empty)\n'
     '- "verification_steps": array of objects: {"step": "name", "command": "cmd", "expected_signal": "what confirms/denies"}\n'
-    '- "alternatives_considered": array of strings\n'
+    '- "alternatives_considered": array of strings (ONLY list alternatives supported by evidence or log context)\n'
     '- "patch_text": string or null (unified diff only when evidence supports exact change)\n'
     '- "workflow": array of objects: {"step": "name", "command": "cmd"}\n'
     '- "safe_to_auto_apply": boolean\n'
@@ -178,13 +184,14 @@ FIX_SUGGESTION_SYSTEM_PROMPT = (
     "Rules:\n"
     "1. Always respond with EXACTLY two lines: one DIAGNOSIS line and one FIXES line\n"
     "2. Derive recommendations from evidence only\n"
-    "3. Do not assume repository design, framework choice, or missing-file content\n"
-    "4. Include verification steps before mutation steps in workflow\n"
-    "5. target_file must be null when evidence is inconclusive\n"
-    "6. patch_text must be null if exact change cannot be justified by evidence\n"
-    "7. safe_to_auto_apply=true only for deterministic, low-risk, fully verifiable fixes\n"
-    "8. NEVER assume branch names (don't hardcode main/master)\n"
-    "9. NEVER hallucinate files or commands\n"
+    "3. ALWAYS include workflow/config verification steps FIRST before mutation steps\n"
+    "4. Do not assume repository design, framework choice, or file existence\n"
+    "5. Do NOT list alternatives unless evidence supports them (e.g., do not suggest 'Rename Dockerfile' without proving Dockerfile exists)\n"
+    "6. target_file must be null when evidence is inconclusive or workflow is unverified\n"
+    "7. patch_text must be null if exact change cannot be justified by evidence\n"
+    "8. safe_to_auto_apply=true only for deterministic, low-risk, fully verifiable fixes\n"
+    "9. NEVER assume branch names (don't hardcode main/master)\n"
+    "10. NEVER hallucinate files, configs, or commands not mentioned in logs/context\n"
 )
 
 FIX_SUGGESTION_TEMPLATE = """PROMPT_VERSION={prompt_version}
@@ -201,16 +208,16 @@ For each fix suggestion, provide these fields in JSON:
 - fix_type: evidence-derived category string
 - auto_fix_possible: boolean
 - target_file: file path needing fix (or null if no specific file)
-- target_confidence: "High", "Medium", or "Low"
-- target_changes: array of {{"file": "path", "action": "add|modify|delete", "reason": "why this file"}}
+- target_confidence: "High", "Medium", or "Low" (confidence that target_file is correct)
+- target_changes: array of {{"file": "path", "action": "add|modify|delete|inspect|check_existence", "reason": "why this file"}}
 - suggested_change: brief human-readable description
-- why_this_fix: concise reasoning tied to evidence
+- why_this_fix: concise reasoning tied to evidence (acknowledge workflow/config uncertainty)
 - evidence_used: array of concrete facts from logs/context
 - assumptions: array of assumptions (empty if none)
-- verification_steps: array of {{"step": "name", "command": "cmd", "expected_signal": "what confirms/denies"}}
-- alternatives_considered: array of alternatives considered but not primary
+- verification_steps: MUST include workflow/config verification FIRST, then file/code checks
+- alternatives_considered: array of alternatives that are EVIDENCE-SUPPORTED (never list unproven assumptions)
 - patch_text: unified diff if evidence supports exact change, otherwise null
-- workflow: array of {{"step": "name", "command": "cmd"}}; start with verification steps before mutation
+- workflow: array of {{"step": "name", "command": "cmd"}}; always verify config FIRST before mutation
 - safe_to_auto_apply: boolean (true only if safe deterministic auto-apply is justified)
 - confidence: "High", "Medium", or "Low"
 - requires_review: boolean
@@ -219,9 +226,9 @@ CRITICAL: Respond with EXACTLY two lines only (no other text):
 DIAGNOSIS: <one-sentence root cause>
 FIXES: [<JSON array or empty []>]
 
-Example with evidence-first behavior:
-DIAGNOSIS: CI references a test path that may be missing or mismatched with repository layout.
-FIXES: [{{"fix_type": "path_or_workflow_mismatch", "auto_fix_possible": false, "target_file": null, "target_confidence": "Low", "target_changes": [{{"file": ".github/workflows/failing-ci.yml", "action": "modify", "reason": "Workflow may reference a non-existent test path"}}, {{"file": "tests/test_app.py", "action": "add", "reason": "May need restoration if file was deleted, but evidence is insufficient"}}], "suggested_change": "Verify whether the workflow test path is correct and whether the file exists before applying changes.", "why_this_fix": "Error mentions a missing test path, but logs do not conclusively prove whether file deletion or workflow misconfiguration is root cause. Target file is null because evidence is inconclusive.", "evidence_used": ["Observed error indicates missing tests/test_app.py path", "No direct evidence in logs that file should contain pytest scaffold"], "assumptions": ["Repository may have moved tests to a different folder", "File may have been deleted in a recent commit"], "verification_steps": [{{"step": "Check repository tree", "command": "git ls-tree -r --name-only HEAD | grep -E '^tests/'", "expected_signal": "Confirms whether tests/test_app.py exists"}}, {{"step": "Review workflow command", "command": "grep -n 'pytest\|test_app.py' .github/workflows/failing-ci.yml", "expected_signal": "Shows whether workflow points to the expected path"}}, {{"step": "Check file history", "command": "git log --oneline -- tests/test_app.py | head -5", "expected_signal": "Confirms whether file was deleted or never existed"}}], "alternatives_considered": ["Restore previously deleted test file based on git history", "Adjust workflow to run test discovery without hardcoded file path", "Create new test file if intended by design"], "patch_text": null, "workflow": [{{"step": "Create investigation branch", "command": "git checkout -b investigate-test-path-failure"}}, {{"step": "Run verification commands", "command": "git ls-tree -r --name-only HEAD | grep '^tests/' && grep -n 'pytest' .github/workflows/failing-ci.yml && git log -n 5 --oneline -- tests/test_app.py"}}, {{"step": "Review verification results and decide", "command": "If file exists: update workflow. If deleted: check git history. If never existed: verify design intent."}}, {{"step": "Open pull request with findings", "command": "gh pr create --title 'Fix CI after path/file verification'"}}], "safe_to_auto_apply": false, "confidence": "Medium", "requires_review": true}}]
+Example with config-first verification:
+DIAGNOSIS: Build fails because Dockerfile.prod cannot be found.
+FIXES: [{{"fix_type": "config_or_file_mismatch", "auto_fix_possible": false, "target_file": null, "target_confidence": "Low", "target_changes": [{{"file": ".github/workflows/build.yml", "action": "inspect", "reason": "Verify Dockerfile.prod reference in build command"}}, {{"file": "Dockerfile.prod", "action": "check_existence", "reason": "Check if file exists or was deleted"}}], "suggested_change": "Verify build command references correct Dockerfile before creating or modifying files.", "why_this_fix": "Error states Dockerfile.prod not found, but unclear if file was deleted, never created, or build command is misconfigured. Config verification must come first.", "evidence_used": ["Error message: 'open Dockerfile.prod: no such file or directory'", "Build command likely references Dockerfile.prod but command itself not shown in logs"], "assumptions": ["Build command is hardcoded to reference Dockerfile.prod", "File may have existed and was deleted, or never created"], "verification_steps": [{{"step": "Check workflow for Dockerfile reference", "command": "grep -n 'Dockerfile' .github/workflows/build.yml", "expected_signal": "Shows what Dockerfile name the workflow expects"}}, {{"step": "List Dockerfile files in repo", "command": "ls -la Dockerfile* || echo 'No Dockerfile variants found'", "expected_signal": "Shows if Dockerfile, Dockerfile.prod, or others exist"}}, {{"step": "Check file history", "command": "git log --oneline -- Dockerfile.prod | head -5", "expected_signal": "Confirms if file was deleted or never committed"}}], "alternatives_considered": ["Update workflow to reference a different Dockerfile if Dockerfile exists", "Create Dockerfile.prod based on Dockerfile template if it exists"], "patch_text": null, "workflow": [{{"step": "Create investigation branch", "command": "git checkout -b fix-dockerfile-reference"}}, {{"step": "Verify build workflow and Dockerfile variants", "command": "grep 'Dockerfile' .github/workflows/build.yml && ls -la Dockerfile*"}}, {{"step": "Check git history for Dockerfile.prod", "command": "git log --oneline -- Dockerfile.prod"}}, {{"step": "Decide and implement", "command": "Based on verification: update workflow path OR restore file OR create file with proper content"}}, {{"step": "Test build", "command": "docker build -f Dockerfile.prod ."}}, {{"step": "Open pull request with fix", "command": "gh pr create --title 'Fix Dockerfile reference after verification'"}}], "safe_to_auto_apply": false, "confidence": "Medium", "requires_review": true}}]
 
 Respond now (EXACTLY two lines, DIAGNOSIS and FIXES):\n"""
 

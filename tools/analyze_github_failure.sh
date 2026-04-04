@@ -149,39 +149,39 @@ if [[ "$fix_count" -gt 0 ]]; then
       | split(" ")
       | map(if length > 0 then (.[0:1] | ascii_upcase) + .[1:] else . end)
       | join(" "))\n" +
-    "  Confidence: \(.confidence)\n" +
-    "  Safe to Auto-Apply: \(if .safe_to_auto_apply then "Yes" else "No" end)\n" +
-    "  Target Confidence: \(.target_confidence // "Unknown")\n" +
-    "  Requires Review: \(if .requires_review then "Yes" else "No" end)\n" +
-    "  Target: \(.target_file // "N/A")\n" +
-    "  Change: \(.suggested_change)\n" +
-    "  Why This Fix: \(.why_this_fix // "N/A")\n" +
+    "Confidence: \(.confidence)\n" +
+    "Safe to Auto-Apply: \(if .safe_to_auto_apply then "Yes" else "No" end)\n" +
+    "Target Confidence: \(.target_confidence // "Unknown")\n" +
+    "Requires Review: \(if .requires_review then "Yes" else "No" end)\n" +
+    (if (.target_file // "") != "" then "Target: \(.target_file)\n" else "" end) +
+    "Change: \(.suggested_change)\n" +
+    "Why This Fix: \(.why_this_fix // "N/A")\n" +
     (if (.target_changes // []) | length > 0 then
-      "  Target Changes:\n" + ((.target_changes // []) | map("    - [\(.action // "modify")] \(.file // "unknown") -> \(.reason // "no reason provided")") | join("\n")) + "\n"
+      "Target Changes:\n" + ((.target_changes // []) | map("  - [\(.action // "modify")] \(.file // "unknown") -> \(.reason // "no reason provided")") | join("\n")) + "\n"
      else ""
      end) +
     (if (.evidence_used // []) | length > 0 then
-      "  Evidence Used:\n" + ((.evidence_used // []) | map("    - " + .) | join("\n")) + "\n"
+      "Evidence Used:\n" + ((.evidence_used // []) | map("  - " + .) | join("\n")) + "\n"
      else ""
      end) +
     (if (.assumptions // []) | length > 0 then
-      "  Assumptions:\n" + ((.assumptions // []) | map("    - " + .) | join("\n")) + "\n"
+      "Assumptions:\n" + ((.assumptions // []) | map("  - " + .) | join("\n")) + "\n"
      else ""
      end) +
     (if (.verification_steps // []) | length > 0 then
-      "  Verification Steps:\n" + ((.verification_steps // []) | map("    - \(.step) [\(.command)] => expected: \(.expected_signal // "N/A")") | join("\n")) + "\n"
+      "Verification Steps:\n" + ((.verification_steps // []) | map("  - \(.step) [\(.command)] => expected: \(.expected_signal // "N/A")") | join("\n")) + "\n"
      else ""
      end) +
     (if (.alternatives_considered // []) | length > 0 then
-      "  Alternatives Considered:\n" + ((.alternatives_considered // []) | map("    - " + .) | join("\n")) + "\n"
+      "Alternatives Considered:\n" + ((.alternatives_considered // []) | map("  - " + .) | join("\n")) + "\n"
      else ""
      end) +
     (if (.patch_text // "") != "" then
-      "  Patch:\n" + (.patch_text | split("\n") | map("    " + .) | join("\n")) + "\n"
+      "Patch:\n" + (.patch_text | split("\n") | map("  " + .) | join("\n")) + "\n"
      else ""
      end) +
     (if (.workflow // []) | length > 0 then
-      "  Workflow:\n" + ((.workflow // []) | map("    - \(.step) [\(.command)]") | join("\n")) + "\n"
+      "Workflow:\n" + ((.workflow // []) | map("  - \(.step) [\(.command)]") | join("\n")) + "\n"
      else ""
      end)
   '
