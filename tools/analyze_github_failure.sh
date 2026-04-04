@@ -150,7 +150,8 @@ if [[ "$fix_count" -gt 0 ]]; then
       | map(if length > 0 then (.[0:1] | ascii_upcase) + .[1:] else . end)
       | join(" "))\n" +
     "  Confidence: \(.confidence)\n" +
-    "  Safe to Apply: \(.safe_to_apply // "Unknown")\n" +
+    "  Safe to Auto-Apply: \(if .safe_to_auto_apply then "Yes" else "No" end)\n" +
+    "  Target Confidence: \(.target_confidence // "Unknown")\n" +
     "  Requires Review: \(if .requires_review then "Yes" else "No" end)\n" +
     "  Target: \(.target_file // "N/A")\n" +
     "  Change: \(.suggested_change)\n" +

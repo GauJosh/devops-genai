@@ -161,6 +161,7 @@ FIX_SUGGESTION_SYSTEM_PROMPT = (
     '- "fix_type": string\n'
     '- "auto_fix_possible": boolean\n'
     '- "target_file": string or null\n'
+    '- "target_confidence": "High" | "Medium" | "Low"\n'
     '- "target_changes": array of objects: {"file": "path", "action": "add|modify|delete", "reason": "why this file"}\n'
     '- "suggested_change": string\n'
     '- "why_this_fix": string (brief reasoning tied to evidence)\n'
@@ -170,7 +171,7 @@ FIX_SUGGESTION_SYSTEM_PROMPT = (
     '- "alternatives_considered": array of strings\n'
     '- "patch_text": string or null (unified diff only when evidence supports exact change)\n'
     '- "workflow": array of objects: {"step": "name", "command": "cmd"}\n'
-    '- "safe_to_apply": "High" | "Medium" | "Low"\n'
+    '- "safe_to_auto_apply": boolean\n'
     '- "confidence": "High" | "Medium" | "Low"\n'
     '- "requires_review": boolean\n'
     "\n"
@@ -179,9 +180,11 @@ FIX_SUGGESTION_SYSTEM_PROMPT = (
     "2. Derive recommendations from evidence only\n"
     "3. Do not assume repository design, framework choice, or missing-file content\n"
     "4. Include verification steps before mutation steps in workflow\n"
-    "5. patch_text must be null if exact change cannot be justified by evidence\n"
-    "6. NEVER assume branch names (don't hardcode main/master)\n"
-    "7. NEVER hallucinate files or commands\n"
+    "5. target_file must be null when evidence is inconclusive\n"
+    "6. patch_text must be null if exact change cannot be justified by evidence\n"
+    "7. safe_to_auto_apply=true only for deterministic, low-risk, fully verifiable fixes\n"
+    "8. NEVER assume branch names (don't hardcode main/master)\n"
+    "9. NEVER hallucinate files or commands\n"
 )
 
 FIX_SUGGESTION_TEMPLATE = """PROMPT_VERSION={prompt_version}
@@ -198,6 +201,7 @@ For each fix suggestion, provide these fields in JSON:
 - fix_type: evidence-derived category string
 - auto_fix_possible: boolean
 - target_file: file path needing fix (or null if no specific file)
+- target_confidence: "High", "Medium", or "Low"
 - target_changes: array of {{"file": "path", "action": "add|modify|delete", "reason": "why this file"}}
 - suggested_change: brief human-readable description
 - why_this_fix: concise reasoning tied to evidence
@@ -207,7 +211,7 @@ For each fix suggestion, provide these fields in JSON:
 - alternatives_considered: array of alternatives considered but not primary
 - patch_text: unified diff if evidence supports exact change, otherwise null
 - workflow: array of {{"step": "name", "command": "cmd"}}; start with verification steps before mutation
-- safe_to_apply: "High", "Medium", or "Low"
+- safe_to_auto_apply: boolean (true only if safe deterministic auto-apply is justified)
 - confidence: "High", "Medium", or "Low"
 - requires_review: boolean
 
@@ -217,7 +221,7 @@ FIXES: [<JSON array or empty []>]
 
 Example with evidence-first behavior:
 DIAGNOSIS: CI references a test path that may be missing or mismatched with repository layout.
-FIXES: [{{"fix_type": "path_or_workflow_mismatch", "auto_fix_possible": false, "target_file": ".github/workflows/failing-ci.yml", "target_changes": [{{"file": ".github/workflows/failing-ci.yml", "action": "modify", "reason": "Workflow may reference a non-existent test path"}}], "suggested_change": "Verify whether the workflow test path is correct before changing repository files.", "why_this_fix": "Error mentions a missing test path, but logs do not prove whether file deletion or workflow misconfiguration is root cause.", "evidence_used": ["Observed error indicates missing tests/test_app.py path", "No direct evidence in logs that file should contain pytest scaffold"], "assumptions": ["Repository may have moved tests to a different folder"], "verification_steps": [{{"step": "Check repository tree", "command": "git ls-tree -r --name-only HEAD | grep -E '^tests/'", "expected_signal": "Confirms whether tests/test_app.py exists"}}, {{"step": "Review workflow command", "command": "grep -n 'pytest\|test_app.py' .github/workflows/failing-ci.yml", "expected_signal": "Shows whether workflow points to the expected path"}}], "alternatives_considered": ["Restore previously deleted test file", "Adjust workflow to run test discovery without hardcoded file path"], "patch_text": null, "workflow": [{{"step": "Create investigation branch", "command": "git checkout -b investigate-test-path-failure"}}, {{"step": "Run verification commands", "command": "git ls-tree -r --name-only HEAD && grep -n 'pytest\\|test_app.py' .github/workflows/failing-ci.yml"}}, {{"step": "Apply the verified fix", "command": "Update workflow path or restore file only after verification"}}, {{"step": "Open pull request", "command": "gh pr create --title 'Fix CI test path after verification'"}}], "safe_to_apply": "Medium", "confidence": "Medium", "requires_review": true}}]
+FIXES: [{{"fix_type": "path_or_workflow_mismatch", "auto_fix_possible": false, "target_file": null, "target_confidence": "Low", "target_changes": [{{"file": ".github/workflows/failing-ci.yml", "action": "modify", "reason": "Workflow may reference a non-existent test path"}}, {{"file": "tests/test_app.py", "action": "add", "reason": "May need restoration if file was deleted, but evidence is insufficient"}}], "suggested_change": "Verify whether the workflow test path is correct and whether the file exists before applying changes.", "why_this_fix": "Error mentions a missing test path, but logs do not conclusively prove whether file deletion or workflow misconfiguration is root cause. Target file is null because evidence is inconclusive.", "evidence_used": ["Observed error indicates missing tests/test_app.py path", "No direct evidence in logs that file should contain pytest scaffold"], "assumptions": ["Repository may have moved tests to a different folder", "File may have been deleted in a recent commit"], "verification_steps": [{{"step": "Check repository tree", "command": "git ls-tree -r --name-only HEAD | grep -E '^tests/'", "expected_signal": "Confirms whether tests/test_app.py exists"}}, {{"step": "Review workflow command", "command": "grep -n 'pytest\|test_app.py' .github/workflows/failing-ci.yml", "expected_signal": "Shows whether workflow points to the expected path"}}, {{"step": "Check file history", "command": "git log --oneline -- tests/test_app.py | head -5", "expected_signal": "Confirms whether file was deleted or never existed"}}], "alternatives_considered": ["Restore previously deleted test file based on git history", "Adjust workflow to run test discovery without hardcoded file path", "Create new test file if intended by design"], "patch_text": null, "workflow": [{{"step": "Create investigation branch", "command": "git checkout -b investigate-test-path-failure"}}, {{"step": "Run verification commands", "command": "git ls-tree -r --name-only HEAD | grep '^tests/' && grep -n 'pytest' .github/workflows/failing-ci.yml && git log -n 5 --oneline -- tests/test_app.py"}}, {{"step": "Review verification results and decide", "command": "If file exists: update workflow. If deleted: check git history. If never existed: verify design intent."}}, {{"step": "Open pull request with findings", "command": "gh pr create --title 'Fix CI after path/file verification'"}}], "safe_to_auto_apply": false, "confidence": "Medium", "requires_review": true}}]
 
 Respond now (EXACTLY two lines, DIAGNOSIS and FIXES):\n"""
 
@@ -371,6 +375,7 @@ class FixSuggestion(BaseModel):
     fix_type: str = Field(description="Category: file_missing, config_error, auth_error, etc.")
     auto_fix_possible: bool = Field(description="Whether automatic application is feasible")
     target_file: Optional[str] = Field(default=None, description="Primary file to modify (repo-relative path)")
+    target_confidence: str = Field(default="Low", description="High / Medium / Low confidence that target file is correct")
     target_changes: Optional[List[Dict[str, str]]] = Field(default=None, description="Files to add/modify/delete with rationale")
     suggested_change: str = Field(description="Human-readable description of the change")
     why_this_fix: str = Field(description="Reasoning for selecting this fix")
@@ -380,7 +385,7 @@ class FixSuggestion(BaseModel):
     alternatives_considered: List[str] = Field(default_factory=list, description="Alternative fix options considered")
     patch_text: Optional[str] = Field(default=None, description="Unified diff format showing exact changes")
     workflow: Optional[List[Dict[str, str]]] = Field(default=None, description="Step-by-step workflow with 'step' and 'command' fields")
-    safe_to_apply: str = Field(description="High / Medium / Low risk level")
+    safe_to_auto_apply: bool = Field(description="True if fix can be safely auto-applied")
     confidence: str = Field(description="High / Medium / Low")
     requires_review: bool = Field(description="True if human review is required before applying")
 
@@ -1085,6 +1090,7 @@ def suggest_fix(req: SuggestFixRequest):
                                 fix_type=fix_obj.get("fix_type", "unknown"),
                                 auto_fix_possible=fix_obj.get("auto_fix_possible", False),
                                 target_file=fix_obj.get("target_file"),
+                                target_confidence=fix_obj.get("target_confidence", "Low"),
                                 target_changes=fix_obj.get("target_changes"),
                                 suggested_change=fix_obj.get("suggested_change", ""),
                                 why_this_fix=fix_obj.get("why_this_fix", "Reasoning not provided"),
@@ -1094,7 +1100,7 @@ def suggest_fix(req: SuggestFixRequest):
                                 alternatives_considered=fix_obj.get("alternatives_considered", []) or [],
                                 patch_text=fix_obj.get("patch_text"),
                                 workflow=fix_obj.get("workflow"),
-                                safe_to_apply=fix_obj.get("safe_to_apply", "Low"),
+                                safe_to_auto_apply=fix_obj.get("safe_to_auto_apply", False),
                                 confidence=fix_obj.get("confidence", "Low"),
                                 requires_review=fix_obj.get("requires_review", False),
                             )
