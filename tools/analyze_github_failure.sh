@@ -30,7 +30,26 @@ echo "==> Downloading logs..."
 echo "Fetching logs for run ID: $RUN_ID, repo id: $REPO and writing to temporary file: $TMP_LOG_FILE"
 gh run view "$RUN_ID" \
   --repo "$REPO" \
-  --log-failed|grep -inE "error|failed|exit|No such file|can't open file" > "$TMP_LOG_FILE"
+  --log-failed \
+  | awk '
+    {
+      line = $0
+      sub(/^.*[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[^ ]*Z[[:space:]]+/, "", line)
+      sub(/^﻿/, "", line)
+      gsub(/\r/, "", line)
+
+      if (line ~ /^env:$/) { skip=1; next }
+      if (skip && line ~ /^##\[endgroup\]$/) { skip=0; next }
+      if (skip) next
+
+      sub(/^##\[group\]/, "", line)
+      sub(/^##\[error\]/, "ERROR: ", line)
+
+      if (line ~ /^shell: /) next
+      if (line ~ /^##\[endgroup\]$/) next
+      if (line != "") print line
+    }
+  ' > "$TMP_LOG_FILE"
 
 echo "==> Logs:"
 echo "$(cat $TMP_LOG_FILE)"
