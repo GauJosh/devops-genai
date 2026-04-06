@@ -471,9 +471,10 @@ python tools/suggest_fix_executor.py \
     --github-repo GauJosh/cicd-demo \
     --github-workflow failing-ci \
     --ingest-logs \
-    --use-kb \
-    --create-pr
+    --use-kb
 ```
+
+PR creation is automatic when safe-to-apply gates pass. Use `--no-create-pr` to run analysis-only mode.
 
 ### PR rules
 - PR only

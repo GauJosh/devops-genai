@@ -588,24 +588,41 @@ def should_auto_pr(
     fix: Dict[str, Any],
     runtime_context: Dict[str, Any],
     require_validation: bool,
-    pr_mode: str,
 ) -> bool:
-    if str(fix.get("confidence", "")).lower() != "high":
-        return False
-    if str(fix.get("target_confidence", "")).lower() != "high":
-        return False
-    if not runtime_context.get("repo_checked_out"):
-        return False
-    if not runtime_context.get("inspections"):
-        return False
-    if require_validation and not runtime_context.get("validation_runs"):
-        return False
+    checks = compute_safe_to_apply_checks(fix, runtime_context, require_validation=require_validation)
+    return all(checks.values())
+
+
+def compute_safe_to_apply_checks(
+    fix: Dict[str, Any],
+    runtime_context: Dict[str, Any],
+    require_validation: bool,
+) -> Dict[str, bool]:
     patch_text = (fix.get("patch_text") or "").strip()
-    if not patch_text:
-        return False
-    if not patch_text.startswith("--- "):
-        return False
-    return True
+    checks = {
+        "confidence_high": str(fix.get("confidence", "")).lower() == "high",
+        "target_confidence_high": str(fix.get("target_confidence", "")).lower() == "high",
+        "safe_to_auto_apply_true": bool(fix.get("safe_to_auto_apply", False)),
+        "repo_checked_out": bool(runtime_context.get("repo_checked_out")),
+        "inspections_present": bool(runtime_context.get("inspections")),
+        "validation_present": (bool(runtime_context.get("validation_runs")) if require_validation else True),
+        "patch_present": bool(patch_text),
+        "patch_is_unified_diff": bool(patch_text.startswith("--- ")),
+    }
+    return checks
+
+
+def print_safe_to_apply_checklist(
+    fix: Dict[str, Any],
+    runtime_context: Dict[str, Any],
+    require_validation: bool,
+) -> None:
+    checks = compute_safe_to_apply_checks(fix, runtime_context, require_validation=require_validation)
+    print("\nSafe-to-Apply Checklist:")
+    for key, ok in checks.items():
+        label = key.replace("_", " ")
+        mark = "✅" if ok else "❌"
+        print(f"  {mark} {label}")
 
 
 def normalize_unified_diff_hunks(patch_text: str) -> str:
@@ -824,15 +841,15 @@ def main() -> int:
     )
     parser.add_argument("--inspect-cmd", action="append", default=[], help="Extra inspection command (bash -lc)")
     parser.add_argument("--validation-cmd", action="append", default=[], help="Validation command to run before PR")
-    parser.add_argument("--create-pr", action="store_true", help="Create PR when strict policy gates pass")
     parser.add_argument(
-        "--pr-mode",
-        default="strict",
-        choices=["strict", "review"],
-        help=(
-            "PR gate mode: strict requires safe_to_auto_apply=true; "
-            "review allows PR creation for high-confidence fixes that require review"
-        ),
+        "--create-pr",
+        action="store_true",
+        help="Deprecated: PR creation is automatic when safe-to-apply gates pass",
+    )
+    parser.add_argument(
+        "--no-create-pr",
+        action="store_true",
+        help="Disable PR creation even when safe-to-apply gates pass",
     )
     parser.add_argument("--title-prefix", default="Automated CI Fix")
     parser.add_argument("--pr-body", default="Automated PR generated from /suggest-fix recommendation. No auto-merge.")
@@ -958,10 +975,12 @@ def main() -> int:
             if idx > 1:
                 print("")
             print_fix_details(fix)
+        print_safe_to_apply_checklist(fixes[0], runtime_context, require_validation=True)
     else:
         print("\nNo structured fixes generated.")
 
-    if not args.create_pr:
+    if args.no_create_pr:
+        print("\n[executor] PR creation disabled by --no-create-pr.")
         total_ms = int((time.time() - script_start) * 1000)
         print(f"\nTotal script runtime: {round(total_ms / 1000)}s")
         return 0
@@ -977,12 +996,12 @@ def main() -> int:
         fix=selected_fix,
         runtime_context=runtime_context,
         require_validation=True,
-        pr_mode=args.pr_mode,
     )
     if not allow_pr:
         print("\n[executor] Policy gates not met; PR creation skipped.")
+        print_safe_to_apply_checklist(selected_fix, runtime_context, require_validation=True)
         print(
-            f"[executor] Gate summary: pr_mode={args.pr_mode}, "
+            f"[executor] Gate summary: "
             f"confidence={selected_fix.get('confidence')}, "
             f"target_confidence={selected_fix.get('target_confidence')}, "
             f"safe_to_auto_apply={selected_fix.get('safe_to_auto_apply')}, "
