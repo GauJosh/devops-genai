@@ -6,6 +6,10 @@ SCRIPT_START_TS=$(date +%s)
 REPO="${1:-GauJosh/cicd-demo}"
 WORKFLOW_NAME="${2:-failing-ci}"
 RAG_BASE_URL="${3:-http://localhost:18000}"
+USE_KB="${USE_KB:-true}"
+KB_SOURCE="${KB_SOURCE:-kb-playbook}"
+KB_TOP_K="${KB_TOP_K:-3}"
+KB_MIN_RELEVANCE="${KB_MIN_RELEVANCE:-1.6}"
 
 TMP_LOG_FILE="$(mktemp)"
 trap 'rm -f "$TMP_LOG_FILE"' EXIT
@@ -116,52 +120,76 @@ jq -Rs \
   }' "$TMP_LOG_FILE" | jq -r '.text'
 
 echo ""
-echo "==> Asking for analysis..."
+# echo "==> Asking for analysis..."
 
-ASK_START_TS=$(date +%s)
+# ASK_START_TS=$(date +%s)
 
-curl -sS -X POST "${RAG_BASE_URL}/ask" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "question": "Analyze this CI/CD failure and respond decisively. Identify the failure category, execution context (workflow/pipeline and failing step), immediate failure, one primary diagnosis, and the first fix to apply now. Avoid weak hedging unless evidence is insufficient. For commands, use repo-relative or local-safe paths, not ephemeral CI runner paths. If a file is missing, prefer verify/restore/correct-path guidance over creating an empty placeholder file unless the evidence explicitly shows a new scaffolded file is expected. Use this exact structure: Failure Category, Execution Context, Immediate Failure, Primary Diagnosis, Evidence, Fix First, Fallback if Fix Fails, Top 3 Verifications, Confidence.",
-    "top_k": 5,
-    "source": "github-actions",
-    "repo": "cicd-demo",
-    "pipeline": "failing-ci",
-    "environment": "ci",
-    "status": "failed",
-    "workflow": "failing-ci",
-    "analysis_mode": "cicd",
-    "model_hint": "gpt-4o-mini",
-    "content_type": "logs",
-    "min_relevance": 2.0,
-    "run_id": "'"$RUN_ID"'"
-  }'|jq -r '.answer'
+# curl -sS -X POST "${RAG_BASE_URL}/ask" \
+#   -H "Content-Type: application/json" \
+#   -d '{
+#     "question": "Analyze this CI/CD failure and respond decisively. Identify the failure category, execution context (workflow/pipeline and failing step), immediate failure, one primary diagnosis, and the first fix to apply now. Avoid weak hedging unless evidence is insufficient. For commands, use repo-relative or local-safe paths, not ephemeral CI runner paths. If a file is missing, prefer verify/restore/correct-path guidance over creating an empty placeholder file unless the evidence explicitly shows a new scaffolded file is expected. Use this exact structure: Failure Category, Execution Context, Immediate Failure, Primary Diagnosis, Evidence, Fix First, Fallback if Fix Fails, Top 3 Verifications, Confidence.",
+#     "top_k": 5,
+#     "source": "github-actions",
+#     "repo": "cicd-demo",
+#     "pipeline": "failing-ci",
+#     "environment": "ci",
+#     "status": "failed",
+#     "workflow": "failing-ci",
+#     "analysis_mode": "cicd",
+#     "model_hint": "gpt-4o-mini",
+#     "content_type": "logs",
+#     "min_relevance": 2.0,
+#     "run_id": "'"$RUN_ID"'"
+#   }'|jq -r '.answer'
 
-ASK_END_TS=$(date +%s)
-echo "Ask response time: $((ASK_END_TS - ASK_START_TS))s"
-echo
+# ASK_END_TS=$(date +%s)
+# echo "Ask response time: $((ASK_END_TS - ASK_START_TS))s"
+# echo
 
 echo "==> Suggesting fixes..."
 
 SUGGEST_START_TS=$(date +%s)
 
+SUGGEST_PAYLOAD="$(jq -n \
+  --arg question "Based on this failure, what are the actionable fixes? Provide one primary diagnosis and 1-3 structured fix suggestions with target files, commands, and safety assessment." \
+  --arg source "github-actions" \
+  --arg repo "cicd-demo" \
+  --arg pipeline "failing-ci" \
+  --arg environment "ci" \
+  --arg status "failed" \
+  --arg workflow "failing-ci" \
+  --arg model_hint "gpt-4o-mini" \
+  --arg run_id "$RUN_ID" \
+  --arg kb_source "$KB_SOURCE" \
+  --argjson top_k 5 \
+  --argjson apply_mode false \
+  --argjson min_relevance 2.0 \
+  --argjson use_kb "$USE_KB" \
+  --argjson kb_top_k "$KB_TOP_K" \
+  --argjson kb_min_relevance "$KB_MIN_RELEVANCE" \
+  '{
+    question: $question,
+    top_k: $top_k,
+    content_type: "logs",
+    source: $source,
+    repo: $repo,
+    pipeline: $pipeline,
+    environment: $environment,
+    status: $status,
+    workflow: $workflow,
+    model_hint: $model_hint,
+    apply_mode: $apply_mode,
+    use_kb: $use_kb,
+    kb_source: $kb_source,
+    kb_top_k: $kb_top_k,
+    kb_min_relevance: $kb_min_relevance,
+    min_relevance: $min_relevance,
+    run_id: $run_id
+  }')"
+
 SUGGEST_RESPONSE="$(curl -sS -X POST "${RAG_BASE_URL}/suggest-fix" \
   -H "Content-Type: application/json" \
-  -d '{
-    "question": "Based on this failure, what are the actionable fixes? Provide one primary diagnosis and 1-3 structured fix suggestions with target files, commands, and safety assessment.",
-    "top_k": 5,
-    "source": "github-actions",
-    "repo": "cicd-demo",
-    "pipeline": "failing-ci",
-    "environment": "ci",
-    "status": "failed",
-    "workflow": "failing-ci",
-    "model_hint": "gpt-4o-mini",
-    "apply_mode": false,
-    "min_relevance": 2.0,
-    "run_id": "'"$RUN_ID"'"
-  }')"
+  -d "$SUGGEST_PAYLOAD")"
 
 SUGGEST_END_TS=$(date +%s)
 echo "Suggest-fix response time: $((SUGGEST_END_TS - SUGGEST_START_TS))s"
@@ -169,6 +197,17 @@ echo "Suggest-fix response time: $((SUGGEST_END_TS - SUGGEST_START_TS))s"
 echo "Diagnosis:"
 if echo "$SUGGEST_RESPONSE" | jq empty >/dev/null 2>&1; then
   echo "$SUGGEST_RESPONSE" | jq -r '.diagnosis // "Unable to determine diagnosis"'
+
+  echo ""
+  echo "$SUGGEST_RESPONSE" | jq -r --arg kb "$KB_SOURCE" '
+    (.retrieved // []) as $r |
+    "Context Summary:\n" +
+    "  Total Chunks: \($r | length)\n" +
+    "  Logs Chunks: \($r | map(select(.content_type == "logs")) | length)\n" +
+    "  Docs Chunks: \($r | map(select(.content_type == "docs")) | length)\n" +
+    "  KB Chunks (\($kb)): \($r | map(select(.content_type == "docs" and .source == $kb)) | length)\n" +
+    "  Sources: \(($r | map(.source) | unique | join(", ")) // "none")"
+  '
 else
   echo "Invalid /suggest-fix response"
   echo "$SUGGEST_RESPONSE"

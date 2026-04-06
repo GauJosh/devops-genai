@@ -193,8 +193,11 @@ FIX_SUGGESTION_SYSTEM_PROMPT = (
     "9. workflow must include three phases in order whenever a fix is known: verification, remediation, validation\n"
     "10. If patch_text identifies an exact file change, target_changes should use action=modify/add/delete instead of inspect\n"
     "11. safe_to_auto_apply=true only for deterministic, low-risk, fully verifiable fixes\n"
-    "12. NEVER assume branch names (don't hardcode main/master)\n"
-    "13. NEVER hallucinate files, configs, or commands not mentioned in logs/context\n"
+    "12. PR policy: create PR only; never merge PR automatically. Never output merge commands.\n"
+    "13. Before High target_confidence or safe_to_auto_apply=true, verification_steps must include repository checkout and direct repo inspection commands (for example git ls-tree/sed/grep on target files).\n"
+    "14. If checkout/repo inspection is missing, force target_confidence to Medium/Low and safe_to_auto_apply=false.\n"
+    "15. NEVER assume branch names (don't hardcode main/master)\n"
+    "16. NEVER hallucinate files, configs, or commands not mentioned in logs/context\n"
 )
 
 FIX_SUGGESTION_TEMPLATE = """PROMPT_VERSION={prompt_version}
@@ -217,11 +220,11 @@ For each fix suggestion, provide these fields in JSON:
 - why_this_fix: concise reasoning tied to evidence (acknowledge workflow/config uncertainty)
 - evidence_used: array of concrete facts from logs/context
 - assumptions: array of assumptions (empty if none)
-- verification_steps: MUST include workflow/config verification FIRST, then file/code checks
+- verification_steps: MUST include checkout + workflow/config verification FIRST, then file/code checks
 - alternatives_considered: array of alternatives that are EVIDENCE-SUPPORTED (never list unproven assumptions)
 - patch_text: plain git-style unified diff only (for example: --- a/app.py, +++ b/app.py, @@, -old, +new); no markdown fences; null if exact change is not justified
-- workflow: array of {{"step": "name", "command": "cmd"}}; must progress through verification FIRST, then remediation, then validation
-- safe_to_auto_apply: boolean (true only if safe deterministic auto-apply is justified)
+- workflow: array of {{"step": "name", "command": "cmd"}}; must progress through verification (including checkout/repo inspection) -> remediation -> validation -> PR creation (no merge)
+- safe_to_auto_apply: boolean (true only if checkout+inspection+validation evidence is explicit)
 - confidence: "High", "Medium", or "Low"
 - requires_review: boolean
 
@@ -231,7 +234,7 @@ FIXES: [<JSON array or empty []>]
 
 Example with exact-code evidence:
 DIAGNOSIS: CI fails because app.py has a Python syntax error: the function definition on line 3 is missing a trailing colon.
-FIXES: [{{"fix_type": "code_syntax_error", "auto_fix_possible": true, "target_file": "app.py", "target_confidence": "High", "target_changes": [{{"file": "app.py", "action": "modify", "reason": "The failing line in app.py is shown directly in the traceback and requires a one-character syntax fix"}}], "suggested_change": "Add the missing colon to the function definition in app.py.", "why_this_fix": "The traceback identifies app.py line 3 and shows the exact invalid line `def main()` together with `SyntaxError: expected ':'`.", "evidence_used": ["Traceback points to app.py line 3", "Observed failing line is `def main()`", "Python reports `SyntaxError: expected ':'`"], "assumptions": [], "verification_steps": [{{"step": "Verify workflow executes app.py", "command": "grep -n 'python app.py' .github/workflows/failing-ci.yml", "expected_signal": "Confirms the workflow is intended to run app.py"}}, {{"step": "Confirm the current source line", "command": "sed -n '1,10p' app.py", "expected_signal": "Shows `def main()` without a colon on line 3"}}], "alternatives_considered": ["Check whether another script should be executed instead of app.py if workflow reference is wrong"], "patch_text": "--- a/app.py\n+++ b/app.py\n@@\n-def main()\n+def main():", "workflow": [{{"step": "Verify workflow reference", "command": "grep -n 'python app.py' .github/workflows/failing-ci.yml"}}, {{"step": "Apply syntax fix", "command": "python - <<'PY'\nfrom pathlib import Path\npath = Path('app.py')\npath.write_text(path.read_text().replace('def main()','def main():', 1))\nPY"}}, {{"step": "Validate Python syntax", "command": "python -m py_compile app.py"}}, {{"step": "Rerun the app locally", "command": "python app.py"}}], "safe_to_auto_apply": false, "confidence": "High", "requires_review": true}}]
+FIXES: [{{"fix_type": "code_syntax_error", "auto_fix_possible": true, "target_file": "app.py", "target_confidence": "High", "target_changes": [{{"file": "app.py", "action": "modify", "reason": "The failing line in app.py is shown directly in the traceback and requires a one-character syntax fix"}}], "suggested_change": "Add the missing colon to the function definition in app.py.", "why_this_fix": "The traceback identifies app.py line 3 and shows the exact invalid line `def main()` together with `SyntaxError: expected ':'`.", "evidence_used": ["Traceback points to app.py line 3", "Observed failing line is `def main()`", "Python reports `SyntaxError: expected ':'`"], "assumptions": [], "verification_steps": [{{"step": "Checkout repository", "command": "git checkout <branch-or-sha>", "expected_signal": "Repository files are available locally for inspection"}}, {{"step": "Verify workflow executes app.py", "command": "grep -n 'python app.py' .github/workflows/failing-ci.yml", "expected_signal": "Confirms the workflow is intended to run app.py"}}, {{"step": "Confirm the current source line", "command": "sed -n '1,10p' app.py", "expected_signal": "Shows `def main()` without a colon on line 3"}}], "alternatives_considered": ["Check whether another script should be executed instead of app.py if workflow reference is wrong"], "patch_text": "--- a/app.py\n+++ b/app.py\n@@\n-def main()\n+def main():", "workflow": [{{"step": "Checkout working branch", "command": "git checkout -b fix-syntax-app-py"}}, {{"step": "Verify workflow reference", "command": "grep -n 'python app.py' .github/workflows/failing-ci.yml"}}, {{"step": "Apply syntax fix", "command": "python - <<'PY'\nfrom pathlib import Path\npath = Path('app.py')\npath.write_text(path.read_text().replace('def main()','def main():', 1))\nPY"}}, {{"step": "Validate Python syntax", "command": "python -m py_compile app.py"}}, {{"step": "Open PR for review", "command": "gh pr create --title 'Fix syntax error in app.py' --body 'Automated fix from CI failure analysis'"}}], "safe_to_auto_apply": false, "confidence": "High", "requires_review": true}}]
 
 Respond now (EXACTLY two lines, DIAGNOSIS and FIXES):\n"""
 
@@ -423,6 +426,10 @@ class SuggestFixRequest(BaseModel):
     apply_mode: bool = Field(default=False, description="If true, fixes will be auto-applied; if false, only suggested")
     content_type: Optional[Literal["logs", "docs"]] = None
     source: Optional[str] = None
+    use_kb: bool = Field(default=True, description="If true, retrieve additional KB guidance docs alongside incident context")
+    kb_source: Optional[str] = Field(default="kb-playbook", description="Source tag for KB docs retrieval")
+    kb_top_k: int = Field(default=3, ge=1, le=20)
+    kb_min_relevance: float = Field(default=1.6, ge=0.0, description="Distance threshold for KB docs retrieval")
 
     # Optional retrieval filters
     repo: Optional[str] = None
@@ -432,6 +439,11 @@ class SuggestFixRequest(BaseModel):
     workflow: Optional[str] = None
     service_name: Optional[str] = None
     run_id: Optional[str] = None
+
+    runtime_context: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="Optional runtime checkout/inspection evidence captured by executor",
+    )
 
     model_hint: Optional[str] = None
 
@@ -533,6 +545,105 @@ def embed_texts(texts: List[str]) -> Tuple[List[List[float]], int]:
         prompt_tokens = int(resp.usage.prompt_tokens)
 
     return vectors, prompt_tokens
+
+
+def render_runtime_context(runtime_context: Optional[Dict[str, Any]]) -> str:
+    if not runtime_context:
+        return ""
+
+    lines: List[str] = []
+    lines.append("RUNTIME_CONTEXT:")
+    lines.append(f"- repo_checked_out: {bool(runtime_context.get('repo_checked_out', False))}")
+
+    checkout_ref = runtime_context.get("checkout_ref")
+    if checkout_ref:
+        lines.append(f"- checkout_ref: {checkout_ref}")
+
+    commit_sha = runtime_context.get("commit_sha")
+    if commit_sha:
+        lines.append(f"- commit_sha: {commit_sha}")
+
+    repo_root = runtime_context.get("repo_root")
+    if repo_root:
+        lines.append(f"- repo_root: {repo_root}")
+
+    inspections = runtime_context.get("inspections") or []
+    lines.append(f"- inspections_count: {len(inspections)}")
+    for idx, item in enumerate(inspections[:8], start=1):
+        command = str((item or {}).get("command", ""))[:240]
+        exit_code = (item or {}).get("exit_code", "")
+        stdout_excerpt = str((item or {}).get("stdout_excerpt", "")).strip()
+        stderr_excerpt = str((item or {}).get("stderr_excerpt", "")).strip()
+        if len(stdout_excerpt) > 240:
+            stdout_excerpt = f"{stdout_excerpt[:240]}..."
+        if len(stderr_excerpt) > 240:
+            stderr_excerpt = f"{stderr_excerpt[:240]}..."
+        lines.append(f"  - [{idx}] exit_code={exit_code} cmd={command}")
+        if stdout_excerpt:
+            lines.append(f"    stdout: {stdout_excerpt}")
+        if stderr_excerpt:
+            lines.append(f"    stderr: {stderr_excerpt}")
+
+    validation_runs = runtime_context.get("validation_runs") or []
+    lines.append(f"- validation_runs_count: {len(validation_runs)}")
+
+    return "\n".join(lines)
+
+
+def enforce_fix_confidence_policy(
+    fixes: List[FixSuggestion],
+    runtime_context: Optional[Dict[str, Any]],
+) -> Tuple[List[FixSuggestion], int]:
+    ctx = runtime_context or {}
+    repo_checked_out = bool(ctx.get("repo_checked_out", False))
+    has_ref_or_sha = bool(ctx.get("checkout_ref") or ctx.get("commit_sha"))
+    inspections = ctx.get("inspections") or []
+    validation_runs = ctx.get("validation_runs") or []
+
+    has_checkout_proof = repo_checked_out and has_ref_or_sha
+    has_inspection_proof = len(inspections) > 0
+    has_validation_proof = len(validation_runs) > 0
+
+    downgraded = 0
+    for fix in fixes:
+        changed = False
+
+        if not (has_checkout_proof and has_inspection_proof):
+            if fix.target_confidence == "High":
+                fix.target_confidence = "Medium"
+                changed = True
+            if fix.confidence == "High":
+                fix.confidence = "Medium"
+                changed = True
+            if fix.safe_to_auto_apply:
+                fix.safe_to_auto_apply = False
+                changed = True
+            if not fix.requires_review:
+                fix.requires_review = True
+                changed = True
+
+        if not has_validation_proof and fix.safe_to_auto_apply:
+            fix.safe_to_auto_apply = False
+            fix.requires_review = True
+            changed = True
+
+        patch_present = bool((fix.patch_text or "").strip())
+        assumptions_empty = len(fix.assumptions or []) == 0
+        high_confidence = (fix.confidence == "High" and fix.target_confidence == "High")
+        strong_runtime_evidence = has_checkout_proof and has_inspection_proof and has_validation_proof
+
+        if strong_runtime_evidence and high_confidence and patch_present and assumptions_empty:
+            if not fix.safe_to_auto_apply:
+                fix.safe_to_auto_apply = True
+                changed = True
+            if fix.requires_review:
+                fix.requires_review = False
+                changed = True
+
+        if changed:
+            downgraded += 1
+
+    return fixes, downgraded
 
 
 # ---------------------------
@@ -915,6 +1026,10 @@ def suggest_fix(req: SuggestFixRequest):
         "endpoint": "/suggest-fix",
         "question": req.question[:100],
         "apply_mode": req.apply_mode,
+        "use_kb": req.use_kb,
+        "kb_source": req.kb_source,
+        "repo_checked_out": bool((req.runtime_context or {}).get("repo_checked_out", False)),
+        "runtime_inspections": len((req.runtime_context or {}).get("inspections") or []),
     }))
 
     q_vecs, q_embed_tokens = embed_texts([req.question])
@@ -923,107 +1038,136 @@ def suggest_fix(req: SuggestFixRequest):
     embed_cost = cost_usd(EMBED_MODEL, input_tokens=q_embed_tokens, output_tokens=0)
     add_cost(endpoint="/suggest-fix", model=EMBED_MODEL, kind="embeddings", amount_usd=embed_cost)
 
-    where_conditions = []
+    def build_where(conditions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if len(conditions) == 1:
+            return conditions[0]
+        if len(conditions) > 1:
+            return {"$and": conditions}
+        return None
+
+    incident_where_conditions: List[Dict[str, Any]] = []
     if req.content_type:
-        where_conditions.append({"content_type": req.content_type})
+        incident_where_conditions.append({"content_type": req.content_type})
+    else:
+        incident_where_conditions.append({"content_type": "logs"})
     if req.source:
-        where_conditions.append({"source": req.source})
+        incident_where_conditions.append({"source": req.source})
     if req.repo:
-        where_conditions.append({"repo": req.repo})
+        incident_where_conditions.append({"repo": req.repo})
     if req.pipeline:
-        where_conditions.append({"pipeline": req.pipeline})
+        incident_where_conditions.append({"pipeline": req.pipeline})
     if req.environment:
-        where_conditions.append({"environment": req.environment})
+        incident_where_conditions.append({"environment": req.environment})
     if req.status:
-        where_conditions.append({"status": req.status})
+        incident_where_conditions.append({"status": req.status})
     if req.workflow:
-        where_conditions.append({"workflow": req.workflow})
+        incident_where_conditions.append({"workflow": req.workflow})
     if req.service_name:
-        where_conditions.append({"service_name": req.service_name})
+        incident_where_conditions.append({"service_name": req.service_name})
     if req.run_id:
-        where_conditions.append({"run_id": req.run_id})
+        incident_where_conditions.append({"run_id": req.run_id})
 
-    where = None
-    if len(where_conditions) == 1:
-        where = where_conditions[0]
-    elif len(where_conditions) > 1:
-        where = {"$and": where_conditions}
-
-    query_kwargs = dict(
+    incident_query_kwargs = dict(
         query_embeddings=[q_embed],
         n_results=req.top_k,
         include=["documents", "metadatas", "distances"],
     )
-    if where:
-        query_kwargs["where"] = where
+    incident_where = build_where(incident_where_conditions)
+    if incident_where:
+        incident_query_kwargs["where"] = incident_where
 
-    results = collection.query(**query_kwargs)
-
-    docs = results.get("documents", [[]])[0]
-    metas = results.get("metadatas", [[]])[0]
-    dists = results.get("distances", [[]])[0]
+    incident_results = collection.query(**incident_query_kwargs)
 
     retrieved: List[RetrievedChunk] = []
     context_parts: List[str] = []
     seen = set()
     citation_num = 0
 
-    for doc, meta, dist in zip(docs, metas, dists):
-        meta = meta or {}
-        if dist is not None and dist > req.min_relevance:
-            continue
+    def append_query_results(query_results: Dict[str, Any], min_relevance: float):
+        nonlocal citation_num
+        docs = query_results.get("documents", [[]])[0]
+        metas = query_results.get("metadatas", [[]])[0]
+        dists = query_results.get("distances", [[]])[0]
 
-        source = meta.get("source", "unknown")
-        content_type = meta.get("content_type", "docs")
-        chunk_index = int(meta.get("chunk_index", -1))
+        for doc, meta, dist in zip(docs, metas, dists):
+            meta = meta or {}
+            if dist is not None and dist > min_relevance:
+                continue
 
-        content_hash = hashlib.sha256(doc.encode("utf-8")).hexdigest()[:16]
-        dedupe_key = (source, content_type, chunk_index, content_hash)
-        if dedupe_key in seen:
-            continue
-        seen.add(dedupe_key)
+            source = meta.get("source", "unknown")
+            content_type = meta.get("content_type", "docs")
+            chunk_index = int(meta.get("chunk_index", -1))
 
-        citation_num += 1
-        citation = f"[{citation_num}]"
+            content_hash = hashlib.sha256(doc.encode("utf-8")).hexdigest()[:16]
+            dedupe_key = (source, content_type, chunk_index, content_hash)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
 
-        retrieved.append(
-            RetrievedChunk(
-                citation=citation,
-                source=source,
-                content_type=content_type,
-                chunk_index=chunk_index,
-                text=doc,
-                distance=dist,
-                repo=meta.get("repo") or None,
-                pipeline=meta.get("pipeline") or None,
-                environment=meta.get("environment") or None,
-                status=meta.get("status") or None,
-                workflow=meta.get("workflow") or None,
-                service_name=meta.get("service_name") or None,
-                run_id=meta.get("run_id") or None,
+            citation_num += 1
+            citation = f"[{citation_num}]"
+
+            retrieved.append(
+                RetrievedChunk(
+                    citation=citation,
+                    source=source,
+                    content_type=content_type,
+                    chunk_index=chunk_index,
+                    text=doc,
+                    distance=dist,
+                    repo=meta.get("repo") or None,
+                    pipeline=meta.get("pipeline") or None,
+                    environment=meta.get("environment") or None,
+                    status=meta.get("status") or None,
+                    workflow=meta.get("workflow") or None,
+                    service_name=meta.get("service_name") or None,
+                    run_id=meta.get("run_id") or None,
+                )
             )
-        )
 
-        context_meta = {
-            "repo": meta.get("repo", ""),
-            "pipeline": meta.get("pipeline", ""),
-            "environment": meta.get("environment", ""),
-            "status": meta.get("status", ""),
-            "workflow": meta.get("workflow", ""),
-            "service_name": meta.get("service_name", ""),
-            "run_id": meta.get("run_id", ""),
-        }
-        context_meta_str = " ".join(
-            f"{k}={v}" for k, v in context_meta.items() if isinstance(v, str) and v
-        )
+            context_meta = {
+                "repo": meta.get("repo", ""),
+                "pipeline": meta.get("pipeline", ""),
+                "environment": meta.get("environment", ""),
+                "status": meta.get("status", ""),
+                "workflow": meta.get("workflow", ""),
+                "service_name": meta.get("service_name", ""),
+                "run_id": meta.get("run_id", ""),
+            }
+            context_meta_str = " ".join(
+                f"{k}={v}" for k, v in context_meta.items() if isinstance(v, str) and v
+            )
 
-        context_header = f"{citation} source={source} type={content_type} chunk={chunk_index}"
-        if context_meta_str:
-            context_header = f"{context_header} {context_meta_str}"
+            context_header = f"{citation} source={source} type={content_type} chunk={chunk_index}"
+            if context_meta_str:
+                context_header = f"{context_header} {context_meta_str}"
 
-        context_parts.append(
-            f"{context_header}\n{doc}"
+            context_parts.append(f"{context_header}\n{doc}")
+
+    append_query_results(incident_results, req.min_relevance)
+
+    if req.use_kb:
+        kb_where_conditions: List[Dict[str, Any]] = [{"content_type": "docs"}]
+        if req.kb_source:
+            kb_where_conditions.append({"source": req.kb_source})
+        if req.repo:
+            kb_where_conditions.append({"repo": req.repo})
+        if req.pipeline:
+            kb_where_conditions.append({"pipeline": req.pipeline})
+        if req.workflow:
+            kb_where_conditions.append({"workflow": req.workflow})
+
+        kb_query_kwargs = dict(
+            query_embeddings=[q_embed],
+            n_results=req.kb_top_k,
+            include=["documents", "metadatas", "distances"],
         )
+        kb_where = build_where(kb_where_conditions)
+        if kb_where:
+            kb_query_kwargs["where"] = kb_where
+
+        kb_results = collection.query(**kb_query_kwargs)
+        append_query_results(kb_results, req.kb_min_relevance)
 
     if not retrieved:
         logger.info(json.dumps({
@@ -1042,6 +1186,9 @@ def suggest_fix(req: SuggestFixRequest):
 
     try:
         context = "\n\n".join(context_parts)
+        runtime_context_text = render_runtime_context(req.runtime_context)
+        if runtime_context_text:
+            context = f"{context}\n\n[runtime] source=executor type=runtime chunk=0\n{runtime_context_text}"
 
         fix_prompt = FIX_SUGGESTION_TEMPLATE.format(
             prompt_version=PROMPT_VERSION,
@@ -1138,6 +1285,17 @@ def suggest_fix(req: SuggestFixRequest):
                         "request_id": request_id,
                         "error": str(parse_err),
                     }))
+
+        fix_suggestions, downgraded = enforce_fix_confidence_policy(
+            fixes=fix_suggestions,
+            runtime_context=req.runtime_context,
+        )
+        if downgraded > 0:
+            logger.info(json.dumps({
+                "event": "suggest_fix_confidence_downgraded",
+                "request_id": request_id,
+                "downgraded_fixes": downgraded,
+            }))
 
         logger.info(json.dumps({
             "event": "suggest_fix_request_complete",

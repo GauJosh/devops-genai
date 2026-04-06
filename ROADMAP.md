@@ -145,6 +145,11 @@ Each layer is isolated and replaceable.
 - [x] CI/CD log ingestion workflow  
 - [x] RAG-based failure analysis  
 - [x] Structured prompt for root cause + next steps  
+- [x] `/suggest-fix` endpoint with structured remediation schema  
+- [x] Hybrid retrieval in `/suggest-fix` (incident logs + KB docs)  
+- [x] Evidence-first prompting with anti-assumption guardrails  
+- [x] PR-only policy in suggestions (no merge commands)  
+- [x] Runtime confidence gating (checkout/inspection required for high-confidence automation)  
 - [x] Support for:
   - Kubernetes failures (CrashLoopBackOff, image pull issues)
   - Terraform/provider errors
@@ -161,10 +166,23 @@ This is now the **primary demonstration layer of the platform.**
 ## Planned
 
 - [ ] Create intentionally failing GitHub Action workflow  
-- [ ] Capture workflow logs using `gh` CLI  
-- [ ] Local ingestion script → `/ingest-log`  
-- [ ] Run `/ask` for automated diagnosis  
-- [ ] Save analysis output for demo  
+- [x] Capture workflow logs using `gh` CLI  
+- [x] Local ingestion script → `/ingest-log`  
+- [x] Run `/ask` for automated diagnosis  
+- [ ] Save analysis output for demo artifacts  
+
+## Executor Automation (In Progress)
+- [x] Python-based executor (drop-in replacement for shell)  
+- [x] Auto-discover latest failed run and ingest failed logs  
+- [x] Repo checkout/inspection evidence sent to `/suggest-fix`  
+- [x] Structured fix rendering with patch/workflow/evidence sections  
+- [x] Guarded PR creation (PR only, no auto-merge)  
+- [x] Cleanup of transient artifacts before commit (`.suggest_fix.patch`, `__pycache__`, `.pyc`)  
+- [x] Patch robustness (diff hunk normalization + remediation fallback)  
+- [x] Re-run hygiene (clean checkout/reset to avoid cumulative edits)  
+- [ ] Trigger executor as downstream workflow from failing target repo (cross-repo orchestration)  
+- [ ] Externalize agent behind accessible DNS for runner access  
+- [ ] Persist vector storage with PostgreSQL + pgvector for shared/production retrieval  
 
 ## Multi-Agent Workflows
 - [ ] Incident triage agent  
@@ -178,10 +196,10 @@ This is now the **primary demonstration layer of the platform.**
 
 # Phase 6.1 – Inference Expansion (Next)
 
-- [ ] Add Ollama as real secondary provider  
+- [x] Add Ollama as real secondary provider (adapter + router integration)  
 - [ ] Compare OpenAI vs local model latency  
-- [ ] Add timeout + retry policies  
-- [ ] Basic routing heuristics  
+- [x] Add timeout + retry policies  
+- [x] Basic routing heuristics  
 
 # Phase 6.2 – AI Gateway & Multi-Tenancy
 
@@ -252,15 +270,17 @@ This is now the **primary demonstration layer of the platform.**
 - Multi-provider abstraction (OpenAI + Mock)
 - Prometheus + Grafana observability
 - Structured prompts producing actionable outputs
+- Structured fix suggestion (`/suggest-fix`) with safety policy guardrails
+- Python executor with ingestion → suggest-fix → guarded PR flow
 
 ---
 
 # Near-Term Next Steps
 
-1. GitHub Actions failure → ingestion → analysis loop  
-2. Add real second provider (Ollama)  
-3. Add retry + timeout policies  
-4. Document architecture + demo flow in README  
+1. Cross-repo workflow chaining (failed workflow triggers executor workflow)  
+2. Host agent behind accessible DNS with secure auth path for runners  
+3. Migrate vector layer to PostgreSQL + pgvector  
+4. Persist and publish analysis/remediation artifacts for demos  
 
 ---
 

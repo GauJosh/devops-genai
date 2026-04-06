@@ -8,121 +8,268 @@
 ![Observability](https://img.shields.io/badge/observability-prometheus%20%2B%20grafana-brightgreen)
 ![Deployment](https://img.shields.io/badge/deployment-kubernetes-blue)
 
-Production-style AI platform lab for DevOps workflows with split inference architecture, RAG retrieval, model routing/fallback, and Kubernetes-native deployment patterns.
+**DevOps GenAI Platform** is an AI infrastructure engineering lab for platform teams that want more than a chatbot.
 
-This project also includes CI/CD failure-analysis agent capabilities with metadata-aware log ingestion and focused operational response mode.
+It combines:
+- metadata-aware RAG retrieval
+- multi-provider inference routing
+- Kubernetes-native deployment patterns
+- CI/CD failure diagnosis
+- structured fix suggestion generation
+- guarded PR automation through a Python executor
+- token, latency, and cost observability
 
-## Architecture Diagram
+This repo is designed to demonstrate how an AI system can behave like a **platform capability**: ingesting operational evidence, reasoning over the right context, and assisting with safe remediation workflows.
+
+---
+
+## Why this product stands out
+
+Most GenAI demos answer questions.
+
+This platform does that **and**:
+- ingests incident logs and knowledge-base docs
+- retrieves only context relevant to a specific repo/workflow/run
+- generates CI/CD-focused diagnosis with evidence
+- proposes machine-readable fixes with verification steps, patch text, and workflow actions
+- routes inference across OpenAI, Ollama, and Mock providers
+- measures cost, traffic, failures, and latency
+- can open a PR from a suggested fix while preserving human review and no-merge safety
+
+It is a practical blueprint for **AI-assisted DevOps and platform operations**.
+
+---
+
+## Architecture at a glance
+
+```text
+Logs / Runbooks / KB Docs
+                    ↓
+            Ingest API
+                    ↓
+ Vector Store + Metadata
+                    ↓
+         RAG Service
+                    ↓
+    Inference Router
+                    ↓
+OpenAI / Ollama / Mock
+                    ↓
+Diagnosis / Fix Suggestions / PR Workflow
+                    ↓
+Prometheus / Grafana / Cost Tracking
+```
+
+### Core building blocks
+
+- **`rag-service`**
+    - ingest docs and logs
+    - retrieve by metadata filters
+    - answer questions with citations
+    - generate structured fix suggestions
+    - expose usage and cost data
+
+- **`inference-router`**
+    - route by `model_hint`
+    - retry transient failures
+    - fall back to alternate providers
+    - emit operational metrics
+
+- **Python executor**
+    - discover failed GitHub runs
+    - fetch and clean failed logs
+    - ingest incident data
+    - inspect target repo state
+    - call `/suggest-fix`
+    - validate and re-evaluate with runtime evidence
+    - create a reviewable PR when gates pass
+
+- **Kubernetes + dashboards**
+    - deployable services with persistent vector storage
+    - health checks, autoscaling, config separation
+    - dashboards for platform visibility
+
+## Architecture diagram
 
 ![DevOps GenAI Architecture](images/devops-genai.jpeg)
 
-## What’s in this workspace
+---
 
-- `rag-service`: public API for ingest/retrieve/ask/chat, dedicated CI/CD log ingestion, and in-memory cost aggregation.
-- `inference-router`: internal generation gateway with provider abstraction (`openai`, `ollama`, `mock`), fallback logic, retries, JSON logs, and Prometheus metrics.
-- `deploy/k8s`: namespace, config, secret, deployments, services, PVC, and HPAs.
-- `dashboard`: Grafana dashboards (`v1`, `v2`, `v3`) plus screenshot galleries for observability and CI/CD analysis scenarios.
-- `eval`: golden prompt harness for regression checks (`eval/run_eval.py`, `eval/golden.json`).
-- `docs`: architecture and routing design notes.
-- `app.py`: legacy monolith prototype kept for reference.
+## Functional capabilities
 
-## Repository Structure
+### 1) Metadata-aware retrieval for operational incidents
+- document and log ingestion with different chunking strategies
+- retrieval filters on `repo`, `pipeline`, `environment`, `status`, `workflow`, `service_name`, `run_id`
+- source browsing and inspection APIs
+- hybrid context support for incident logs plus KB docs
+
+### 2) CI/CD failure analysis
+- specialized CI/CD prompt mode in `/ask`
+- clear separation of symptom, root cause, and next checks
+- concise operator-friendly output
+- support for common delivery and runtime failure patterns
+
+### 3) Structured fix suggestion engine
+`/suggest-fix` produces typed remediation objects containing:
+- `diagnosis`
+- `fix_type`
+- `target_file`
+- `target_changes`
+- `why_this_fix`
+- `evidence_used`
+- `assumptions`
+- `verification_steps`
+- `alternatives_considered`
+- `patch_text`
+- `workflow`
+- `safe_to_auto_apply`
+- `confidence`
+- `requires_review`
+
+### 4) Safety-first automation model
+- evidence-first prompting
+- anti-hallucination and anti-assumption rules
+- PR-only policy
+- no automatic merge
+- checkout and repo-inspection requirements for high-confidence automation
+- server-side confidence gating based on runtime evidence
+
+### 5) Multi-provider inference architecture
+- OpenAI for cloud inference
+- Ollama for local/alternate model serving
+- Mock provider for fallback/testing
+- retry/backoff and fallback logic in the router
+
+### 6) End-to-end remediation executor
+- GitHub failed-run discovery
+- failed-log download and cleanup
+- auto-ingestion into RAG
+- repo auto-clone or repo reuse
+- validation command derivation from suggested fix steps
+- patch normalization and remediation fallback
+- transient artifact cleanup before commit
+- guarded PR creation
+
+### 7) Full observability surface
+- structured JSON logs
+- inference request/failure metrics
+- token accounting
+- request cost estimation
+- Grafana dashboards for traffic, cost, latency, and failures
+
+---
+
+## What is implemented right now
+
+### Retrieval and knowledge layer
+- `POST /ingest`
+- `POST /ingest-log`
+- embeddings with `text-embedding-3-small`
+- Chroma-backed vector retrieval
+- metadata-aware filtering
+- source and ingested-chunk inspection endpoints
+
+### Diagnosis layer
+- `POST /ask`
+- general question-answer mode
+- CI/CD-specific analysis mode
+
+### Remediation layer
+- `POST /suggest-fix`
+- hybrid retrieval from logs + KB
+- structured fix schema and parsing
+- runtime context injection from executor
+- post-generation safety and confidence enforcement
+
+### Inference layer
+- `POST /v1/generate`
+- provider abstraction
+- retries and timeouts
+- fallback support
+- request tracing support
+
+### Automation layer
+- pure Python executor in [tools/suggest_fix_executor.py](tools/suggest_fix_executor.py)
+- failed GitHub run lookup
+- log cleanup and ingestion loop
+- repo checkout/reset/clean flow
+- patch application with normalization
+- PR creation with strict guardrails
+
+### Evaluation and visibility
+- Prometheus metrics
+- Grafana dashboards
+- golden evaluation harness for answer and fix flows
+
+---
+
+## Repository structure
 
 ```text
 devops-genai/
 ├── README.md
-├── app.py
-├── requests.http
 ├── ROADMAP.md
+├── requests.http
 ├── dashboard/
-│   ├── grafana-dashboard-1.jpg
-│   ├── grafana-dashboard-2.jpg
-│   ├── grafana-dashboard-3.jpg
-│   ├── grafana-dashboard-v1.json
-│   └── grafana-dashboard-v2.json
-│   ├── grafana-dashboard-v3.json
-│   ├── response-scenario-1.jpg
-│   ├── response-scenario-2.jpg
-│   └── response-scenario-3.jpg
 ├── deploy/k8s/
-│   ├── namespace.yaml
-│   ├── configmap.yaml
-│   ├── secret.yaml
-│   ├── pvc.yaml
-│   ├── rag-deployment.yaml
-│   ├── rag-service.yaml
-│   ├── router-deployment.yaml
-│   ├── router-service.yaml
-│   └── hpa.yaml
 ├── docs/
-│   ├── architecture_diagram.png
-│   ├── inference-architecture.md
-│   └── multi-model-routing.md
 ├── eval/
-│   ├── golden.json
-│   └── run_eval.py
-└── services/
-    ├── inference-router/
-    │   ├── Dockerfile
-    │   ├── requirements.txt
-    │   └── app/
-    └── rag-service/
-        ├── Dockerfile
-        ├── requirements.txt
-        └── app/
+├── images/
+├── services/
+│   ├── inference-router/
+│   └── rag-service/
+└── tools/
+        ├── analyze_github_failure.sh
+        └── suggest_fix_executor.py
 ```
 
-## Core Flows
+### Important folders
+- `services/rag-service/` – ingestion, retrieval, prompting, `/ask`, `/suggest-fix`
+- `services/inference-router/` – routing, retries, fallback, metrics
+- `tools/` – shell and Python automation flows
+- `deploy/k8s/` – Kubernetes manifests
+- `dashboard/` – Grafana JSON and demo screenshots
+- `eval/` – regression harness
+- `docs/` – architecture notes and design rationale
 
-### 1) Ingestion (`rag-service`)
-1. Accepts raw docs/logs via `/ingest`.
-2. Applies content-aware chunking (`docs` vs `logs`).
-3. Generates embeddings (`text-embedding-3-small`).
-4. Stores chunks + metadata in ChromaDB.
+---
 
-### 1.1) CI/CD Log Ingestion (`rag-service`)
-1. Accepts CI/CD logs via `/ingest-log`.
-2. Forces `content_type="logs"` and defaults source to `cicd` when missing.
-3. Persists CI/CD metadata fields for filtered retrieval:
-    - `repo`, `pipeline`, `environment`, `status`, `workflow`, `service_name`
+## Core product flows
 
-This enables targeted incident queries like: “show failed deploy logs for `payments-api` in `dev`.”
+### A. Ingestion flow
+1. Accept raw text via `/ingest` or `/ingest-log`.
+2. Chunk according to content type.
+3. Generate embeddings.
+4. Store vectors and metadata.
+5. Make context searchable by incident scope.
 
-### 2) Retrieval + Answer (`/ask`)
-1. Embeds the question.
-2. Retrieves top-k chunks from ChromaDB with optional metadata filters.
-3. Builds citation-aware prompt template.
-4. Calls `inference-router` (`/v1/generate`).
-5. Returns answer, retrieved chunks, token usage, and endpoint cost fields.
+### B. Diagnosis flow (`/ask`)
+1. Embed the question.
+2. Retrieve top relevant chunks.
+3. Assemble context with citations.
+4. Send prompt through inference-router.
+5. Return answer, retrieved chunks, usage, and cost.
 
-### 2.1) CI/CD Analysis Mode (`/ask` with `analysis_mode="cicd"`)
-- Uses CI/CD-specific system prompt and response template.
-- Separates immediate failure from likely underlying cause.
-- Produces concise, operations-first output with:
-    - `Immediate Failure`
-    - `Likely Underlying Cause`
-    - `Evidence`
-    - `First 3 Checks`
-    - `Suggested Fix`
-    - `Confidence`
+### C. Fix suggestion flow (`/suggest-fix`)
+1. Retrieve incident logs and optional KB chunks.
+2. Build structured remediation prompt.
+3. Generate typed fix suggestions.
+4. Parse diagnosis and fix objects.
+5. Apply runtime-aware confidence policy.
 
-### 3) Inference Routing (`inference-router`)
-- `model_hint` starts with `gpt*` → `openai` adapter.
-- `model_hint` starts with `llama*`, `phi*`, `mistral*`, `qwen*`, `gemma*` → `ollama` adapter.
-- `model_hint` starts with `mock*` → `mock` adapter.
-- `model_hint == OLLAMA_DEFAULT_MODEL` → `ollama` adapter.
-- Otherwise → `ROUTER_DEFAULT_PROVIDER`.
-- On primary failure, router optionally retries with `ROUTER_FALLBACK_PROVIDER` when enabled.
+### D. Executor flow
+1. Discover the latest failed GitHub run.
+2. Download and clean failed logs.
+3. Ingest logs into the platform.
+4. Ensure clean repo checkout.
+5. Call `/suggest-fix`.
+6. Run safe validation commands from suggested steps.
+7. Re-evaluate with runtime evidence.
+8. Create a PR when policy gates allow it.
 
-## Model Support
+---
 
-| Provider | Status | Notes |
-|---|---|---|
-| OpenAI | ✅ Supported | Default cloud inference path (`gpt*` model hints). |
-| Ollama | ✅ Supported | Local inference via `OLLAMA_BASE_URL` and `OLLAMA_DEFAULT_MODEL`. |
-| Mock | ✅ Supported | Lightweight fallback/testing provider (`mock*` hints). |
-
-## API Endpoints
+## API surface
 
 ### `rag-service` (default `http://localhost:8000`)
 - `GET /healthz`
@@ -130,6 +277,7 @@ This enables targeted incident queries like: “show failed deploy logs for `pay
 - `POST /ingest`
 - `POST /ingest-log`
 - `POST /ask`
+- `POST /suggest-fix`
 - `GET /sources`
 - `GET /ingested`
 - `GET /costs`
@@ -141,7 +289,25 @@ This enables targeted incident queries like: “show failed deploy logs for `pay
 - `GET /metrics`
 - `POST /v1/generate`
 
-## Local Development
+---
+
+## Model support
+
+| Provider | Status | Notes |
+|---|---|---|
+| OpenAI | ✅ Supported | Default cloud inference path |
+| Ollama | ✅ Supported | Local or alternate inference path |
+| Mock | ✅ Supported | Lightweight fallback/testing path |
+
+### Routing rules
+- `gpt*` → OpenAI
+- `llama*`, `phi*`, `mistral*`, `qwen*`, `gemma*` → Ollama
+- `mock*` → Mock
+- otherwise → default provider
+
+---
+
+## Local development
 
 ### 1) Python environment
 
@@ -179,27 +345,29 @@ pip install -r services/inference-router/requirements.txt
 pip install -r services/rag-service/requirements.txt
 ```
 
-### 4) Run services (two terminals)
+### 4) Run services
 
-Terminal A (`inference-router`):
+Terminal A:
 
 ```bash
 cd services/inference-router
 uvicorn app.main:app --host 0.0.0.0 --port 8001 --reload
 ```
 
-Terminal B (`rag-service`):
+Terminal B:
 
 ```bash
 cd services/rag-service
 uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload
 ```
 
-Use the `requests.http` file for quick endpoint testing.
+Use [requests.http](requests.http) for quick endpoint testing.
 
-### CI/CD quickstart
+---
 
-Ingest CI/CD logs with metadata:
+## Quickstart scenarios
+
+### Ingest CI/CD logs
 
 ```bash
 curl -X POST http://localhost:8000/ingest-log \
@@ -216,7 +384,7 @@ curl -X POST http://localhost:8000/ingest-log \
     }'
 ```
 
-Run CI/CD failure analysis:
+### Diagnose with `/ask`
 
 ```bash
 curl -X POST http://localhost:8000/ask \
@@ -234,6 +402,89 @@ curl -X POST http://localhost:8000/ask \
     }'
 ```
 
+### Generate structured fixes with `/suggest-fix`
+
+```bash
+curl -X POST http://localhost:8000/suggest-fix \
+    -H "Content-Type: application/json" \
+    -d '{
+        "question": "Based on this failure, what are the actionable fixes?",
+        "top_k": 5,
+        "min_relevance": 2.0,
+        "content_type": "logs",
+        "source": "github-actions",
+        "repo": "payments-api",
+        "pipeline": "deploy",
+        "environment": "dev",
+        "status": "failed",
+        "use_kb": true,
+        "kb_source": "kb-playbook"
+    }'
+```
+
+---
+
+## Python executor
+
+The executor connects diagnosis with safe action.
+
+It can:
+- discover the latest failed GitHub Actions run
+- fetch and clean failed logs
+- ingest logs into the RAG system
+- auto-clone or reuse a target repo checkout
+- inspect repo state and send runtime evidence to the agent
+- render rich remediation suggestions
+- normalize malformed diffs
+- fall back to safe remediation commands when needed
+- remove temporary artifacts before commit
+- open PRs without any merge automation
+
+### Example: local/manual mode
+
+```bash
+python tools/suggest_fix_executor.py \
+    --agent-url http://localhost:8000 \
+    --question "CI failed in deploy workflow with missing artifact" \
+    --repo-path . \
+    --source github-actions \
+    --content-type logs \
+    --use-kb
+```
+
+### Example: GitHub failed-run mode
+
+```bash
+python tools/suggest_fix_executor.py \
+    --agent-url http://localhost:18000 \
+    --github-repo GauJosh/cicd-demo \
+    --github-workflow failing-ci \
+    --ingest-logs \
+    --use-kb
+```
+
+### Example: guarded PR creation
+
+```bash
+python tools/suggest_fix_executor.py \
+    --agent-url http://localhost:18000 \
+    --github-repo GauJosh/cicd-demo \
+    --github-workflow failing-ci \
+    --ingest-logs \
+    --use-kb \
+    --create-pr
+```
+
+### PR rules
+- PR only
+- no auto-merge
+- requires strong runtime evidence
+- requires high-confidence suggestion output
+- requires meaningful repo changes
+- cleans transient files before commit
+
+---
+
 ## Docker
 
 Build images:
@@ -250,9 +501,11 @@ docker run --rm -p 8001:8000 --env-file .env inference-router:local
 docker run --rm -p 8000:8000 --env-file .env -e INFERENCE_ROUTER_URL=http://host.docker.internal:8001 rag-service:local
 ```
 
-## Kubernetes (Manifests in `deploy/k8s`)
+---
 
-Apply resources:
+## Kubernetes deployment
+
+Apply manifests:
 
 ```bash
 kubectl apply -f deploy/k8s/namespace.yaml
@@ -266,32 +519,31 @@ kubectl apply -f deploy/k8s/rag-service.yaml
 kubectl apply -f deploy/k8s/hpa.yaml
 ```
 
-Notes:
-- Namespace: `devops-genai`
-- `rag-service` mounts PVC `chroma-pvc` at `/data/chroma_db`
-- HPA configured for both deployments (`min=1`, `max=3`, CPU target `60%`)
-- `secret.yaml` must be updated with a valid `OPENAI_API_KEY`
+### Notes
+- namespace: `devops-genai`
+- persistent vector storage via PVC-backed Chroma
+- HPA for both services
+- set a valid `OPENAI_API_KEY` in [deploy/k8s/secret.yaml](deploy/k8s/secret.yaml)
+
+---
 
 ## Observability
 
-### Router metrics (`/metrics`)
+### Router metrics
 - `inference_requests_total{provider,purpose,model}`
 - `inference_failures_total{provider,purpose,failure_stage}`
 - `inference_latency_seconds{provider,purpose,model}`
 - `inference_input_tokens_total{provider,purpose,model}`
 - `inference_output_tokens_total{provider,purpose,model}`
 
-### Dashboards
-- `dashboard/grafana-dashboard-v1.json`
-- `dashboard/grafana-dashboard-v2.json`
-- `dashboard/grafana-dashboard-v3.json`
+### Dashboard assets
+- [dashboard/grafana-dashboard-v1.json](dashboard/grafana-dashboard-v1.json)
+- [dashboard/grafana-dashboard-v2.json](dashboard/grafana-dashboard-v2.json)
+- [dashboard/grafana-dashboard-v3.json](dashboard/grafana-dashboard-v3.json)
 
-### Grafana dashboard links
-- Local Grafana home: [http://localhost:3000](http://localhost:3000)
-- Suggested dashboard path after import: [http://localhost:3000/dashboards](http://localhost:3000/dashboards)
-- JSON: [Dashboard V1](dashboard/grafana-dashboard-v1.json)
-- JSON: [Dashboard V2](dashboard/grafana-dashboard-v2.json)
-- JSON: [Dashboard V3](dashboard/grafana-dashboard-v3.json)
+### Grafana links
+- [Local Grafana home](http://localhost:3000)
+- [Dashboards page](http://localhost:3000/dashboards)
 
 ### Dashboard gallery
 
@@ -299,23 +551,26 @@ Notes:
 |---|---|---|
 | ![Grafana Dashboard 1](dashboard/grafana-dashboard-1.jpg) | ![Grafana Dashboard 2](dashboard/grafana-dashboard-2.jpg) | ![Grafana Dashboard 3](dashboard/grafana-dashboard-3.jpg) |
 
-## CI/CD Failure Analysis Agent
+---
 
-This project now supports a CI/CD-focused analysis workflow that combines:
+## CI/CD analysis gallery
+
+This project supports a log-to-remediation loop that combines:
 - log-first retrieval
-- metadata-scoped filtering
-- operational response formatting
-- evidence-backed recommendations with citations
-
-### Response scenarios
+- metadata-scoped context selection
+- evidence-backed diagnosis
+- structured fixes
+- guarded automation
 
 | Scenario 1 | Scenario 2 | Scenario 3 |
 |---|---|---|
 | ![CI/CD Response Scenario 1](dashboard/response-scenario-1.jpg) | ![CI/CD Response Scenario 2](dashboard/response-scenario-2.jpg) | ![CI/CD Response Scenario 3](dashboard/response-scenario-3.jpg) |
 
-## Evaluation Harness
+---
 
-Golden tests call `POST /ask` and validate answer shape/content and citations.
+## Evaluation harness
+
+Run golden tests:
 
 ```bash
 python eval/run_eval.py
@@ -327,16 +582,38 @@ Optional custom file:
 python eval/run_eval.py eval/golden.json
 ```
 
-## Useful Docs
+---
 
-- `docs/inference-architecture.md`
-- `docs/multi-model-routing.md`
-- `ROADMAP.md`
+## Useful docs
+
+- [ROADMAP.md](ROADMAP.md)
+- [docs/inference-architecture.md](docs/inference-architecture.md)
+- [docs/multi-model-routing.md](docs/multi-model-routing.md)
+- [docs/routing-policy.md](docs/routing-policy.md)
+
+---
 
 ## Troubleshooting
 
-- `OPENAI_API_KEY not set`: provide key in `.env` (local) or `deploy/k8s/secret.yaml` (K8s).
-- `/ask` returns “Insufficient context”: ingest relevant docs/logs first via `/ingest`.
-- CI/CD query returns weak/no evidence: use `/ingest-log` and include matching metadata (`repo`, `pipeline`, `environment`, `status`).
-- Router 502 errors: inspect router logs for primary/fallback failure events.
-- No autoscaling in cluster: verify metrics-server is installed for HPA.
+- `OPENAI_API_KEY not set` → provide a key in `.env` or [deploy/k8s/secret.yaml](deploy/k8s/secret.yaml)
+- `/ask` returns `Insufficient context` → ingest docs/logs first
+- weak CI/CD answers → ensure incident metadata matches the failing run
+- router 502s → inspect inference-router logs for retry/fallback failures
+- no autoscaling → verify `metrics-server` exists in cluster
+- noisy PRs → executor now removes transient artifacts before commit
+- malformed patch text → executor normalizes diff hunks and can fall back to safe remediation commands
+
+---
+
+## Where this platform can go next
+
+The current system already demonstrates a strong local and Kubernetes-native AI operations platform.
+
+The next evolution is straightforward:
+- expose the agent behind a secure DNS endpoint
+- trigger executor from a separate workflow/repo
+- move vector persistence to `pgvector`
+- support cross-repo operational automation
+- strengthen tenant isolation and enterprise access patterns
+
+That turns this from a powerful demo into a compelling foundation for **AI-assisted platform operations at scale**.

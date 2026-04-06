@@ -9,3 +9,4 @@ chroma_db/
 
 data/
 *.sqlite3
+*drawio*
