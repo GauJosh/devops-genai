@@ -271,3 +271,11 @@ Content-Type: application/json
     "min_relevance": 2.0,
     "run_id": "23981327892"
   }
+
+
+PAYLOAD=$(jq -Rs --arg source "kb-playbook" --arg content_type "docs" --arg repo "cicd-demo" --arg pipeline "failing-ci" --arg environment "ci" --arg status "reference" --arg workflow "failing-ci" --arg service_name "agent-kb" --arg run_id "kb-cicd-playbook-v1" '{source:$source, content_type:$content_type, text:., repo:$repo, pipeline:$pipeline, environment:$environment, status:$status, workflow:$workflow, service_name:$service_name, run_id:$run_id}' docs/cicd-failure-playbook-kb.md); curl -sS -X POST "http://localhost:18000/ingest" -H "Content-Type: application/json" --data-binary "$PAYLOAD" | jq .
+
+curl -sS "http://localhost:18000/sources" | jq .
+
+curl -sS -X POST "http://localhost:18000/ask" -H "Content-Type: application/json" -d '{"question":"From the CI/CD playbook KB, what is the safe auto-apply policy?","top_k":8,"content_type":"docs","source":"kb-playbook","repo":"cicd-demo","workflow":"failing-ci","model_hint":"gpt-4o-mini"}' | jq -r '.answer // .detail // .'
+
