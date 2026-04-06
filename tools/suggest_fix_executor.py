@@ -9,6 +9,7 @@ import time
 import urllib.error
 import urllib.request
 import shutil
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -430,6 +431,92 @@ def yes_no(value: Any) -> str:
     return "Yes" if bool(value) else "No"
 
 
+def build_branch_name(fix: Dict[str, Any]) -> str:
+    branch_fragment = sanitize_branch_fragment(fix.get("fix_type", "ci-fix"))
+    now = datetime.now(timezone.utc)
+    date_part = now.strftime("%Y%m%d")
+    timestamp_part = str(int(now.timestamp()))
+    return f"auto/{branch_fragment}-{date_part}-{timestamp_part}"
+
+
+def build_pr_title(title_prefix: str, fix: Dict[str, Any]) -> str:
+    return f"{title_prefix}: {format_fix_category(str(fix.get('fix_type', 'ci-fix')))}"
+
+
+def build_pr_body(
+    diagnosis: str,
+    fix: Dict[str, Any],
+    runtime_context: Dict[str, Any],
+    extra_body: str,
+) -> str:
+    lines: List[str] = []
+    lines.append("## Created by DevOps GenAI Agent")
+    lines.append("")
+    lines.append("This PR was created automatically by the DevOps GenAI Agent after analyzing CI/CD failure context, repository state, and runtime validation evidence.")
+    lines.append("")
+    lines.append("## Diagnosis")
+    lines.append(diagnosis or "No diagnosis provided.")
+    lines.append("")
+    lines.append("## Why fix works")
+    lines.append(fix.get("why_this_fix", "No rationale provided."))
+    lines.append("")
+    lines.append("## Confidence")
+    lines.append(f"- Overall: {fix.get('confidence', 'Unknown')}")
+    lines.append(f"- Target: {fix.get('target_confidence', 'Unknown')}")
+    lines.append(f"- Safe to Auto-Apply: {yes_no(fix.get('safe_to_auto_apply', False))}")
+    lines.append(f"- Requires Review: {yes_no(fix.get('requires_review', True))}")
+    lines.append("")
+    lines.append("## Validation Steps")
+
+    validation_runs = runtime_context.get("validation_runs") or []
+    if validation_runs:
+        for item in validation_runs:
+            command = (item or {}).get("command", "")
+            exit_code = (item or {}).get("exit_code", "")
+            stdout_excerpt = excerpt(str((item or {}).get("stdout_excerpt", "")), limit=200)
+            stderr_excerpt = excerpt(str((item or {}).get("stderr_excerpt", "")), limit=200)
+            lines.append(f"- `{command}` → exit_code={exit_code}")
+            if stdout_excerpt:
+                lines.append(f"  - stdout: {stdout_excerpt}")
+            if stderr_excerpt:
+                lines.append(f"  - stderr: {stderr_excerpt}")
+    else:
+        verification_steps = fix.get("verification_steps") or []
+        if verification_steps:
+            for item in verification_steps:
+                step = (item or {}).get("step", "step")
+                command = (item or {}).get("command", "")
+                expected_signal = (item or {}).get("expected_signal", "N/A")
+                lines.append(f"- {step}: `{command}`")
+                lines.append(f"  - expected: {expected_signal}")
+        else:
+            lines.append("- No validation steps were captured.")
+
+    target_changes = fix.get("target_changes") or []
+    if target_changes:
+        lines.append("")
+        lines.append("## Target Changes")
+        for item in target_changes:
+            action = (item or {}).get("action", "modify")
+            file_path = (item or {}).get("file", "unknown")
+            reason = (item or {}).get("reason", "no reason provided")
+            lines.append(f"- [{action}] `{file_path}` — {reason}")
+
+    evidence_used = fix.get("evidence_used") or []
+    if evidence_used:
+        lines.append("")
+        lines.append("## Evidence Used")
+        for item in evidence_used:
+            lines.append(f"- {item}")
+
+    if extra_body.strip():
+        lines.append("")
+        lines.append("## Additional Notes")
+        lines.append(extra_body.strip())
+
+    return "\n".join(lines).strip()
+
+
 def print_fix_details(fix: Dict[str, Any]) -> None:
     print(f"Category: {format_fix_category(str(fix.get('fix_type', 'unknown')))}")
     print(f"Confidence: {fix.get('confidence', 'Low')}")
@@ -605,9 +692,11 @@ def cleanup_transient_artifacts(repo_path: Path) -> None:
 
 def apply_patch_and_open_pr(
     repo_path: Path,
+    diagnosis: str,
     fix: Dict[str, Any],
     title_prefix: str,
     pr_body: str,
+    runtime_context: Dict[str, Any],
 ) -> Dict[str, Any]:
     cleanup_transient_artifacts(repo_path)
 
@@ -651,8 +740,7 @@ def apply_patch_and_open_pr(
 
     cleanup_transient_artifacts(repo_path)
 
-    branch_fragment = sanitize_branch_fragment(fix.get("fix_type", "ci-fix"))
-    branch_name = f"auto/{branch_fragment}-{int(time.time())}"
+    branch_name = build_branch_name(fix)
 
     checkout = run_cmd(["git", "checkout", "-b", branch_name], cwd=repo_path)
     if checkout["exit_code"] != 0:
@@ -669,9 +757,15 @@ def apply_patch_and_open_pr(
     if push["exit_code"] != 0:
         raise RuntimeError(f"Git push failed: {push['stderr']}")
 
-    pr_title = f"{title_prefix}: {fix.get('fix_type', 'ci-fix')}"
+    pr_title = build_pr_title(title_prefix, fix)
+    rendered_pr_body = build_pr_body(
+        diagnosis=diagnosis,
+        fix=fix,
+        runtime_context=runtime_context,
+        extra_body=pr_body,
+    )
     pr_create = run_cmd(
-        ["gh", "pr", "create", "--title", pr_title, "--body", pr_body, "--head", branch_name],
+        ["gh", "pr", "create", "--title", pr_title, "--body", rendered_pr_body, "--head", branch_name],
         cwd=repo_path,
     )
     if pr_create["exit_code"] != 0:
@@ -902,9 +996,11 @@ def main() -> int:
 
     pr_info = apply_patch_and_open_pr(
         repo_path=repo_path,
+        diagnosis=diagnosis,
         fix=selected_fix,
         title_prefix=args.title_prefix,
         pr_body=args.pr_body,
+        runtime_context=runtime_context,
     )
     print("\n[executor] PR created successfully.")
     print(f"  branch: {pr_info['branch_name']}")
