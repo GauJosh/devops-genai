@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+SCRIPT_START_TS=$(date +%s)
+
 REPO="${1:-GauJosh/cicd-demo}"
 WORKFLOW_NAME="${2:-failing-ci}"
 RAG_BASE_URL="${3:-http://localhost:18000}"
@@ -57,6 +59,8 @@ echo ""
 
 echo "==> Ingesting logs into devops-genai..."
 
+INGEST_START_TS=$(date +%s)
+
 jq -Rs \
   --arg source "github-actions" \
   --arg repo_name "cicd-demo" \
@@ -82,6 +86,9 @@ jq -Rs \
 | curl -sS -X POST "${RAG_BASE_URL}/ingest-log" \
     -H "Content-Type: application/json" \
     -d @-
+
+INGEST_END_TS=$(date +%s)
+echo "Ingest response time: $((INGEST_END_TS - INGEST_START_TS))s"
 
 echo "Print exact text field sent to curl:"
 echo ""
@@ -111,6 +118,8 @@ jq -Rs \
 echo ""
 echo "==> Asking for analysis..."
 
+ASK_START_TS=$(date +%s)
+
 curl -sS -X POST "${RAG_BASE_URL}/ask" \
   -H "Content-Type: application/json" \
   -d '{
@@ -128,9 +137,14 @@ curl -sS -X POST "${RAG_BASE_URL}/ask" \
     "min_relevance": 2.0,
     "run_id": "'"$RUN_ID"'"
   }'|jq -r '.answer'
+
+ASK_END_TS=$(date +%s)
+echo "Ask response time: $((ASK_END_TS - ASK_START_TS))s"
 echo
 
 echo "==> Suggesting fixes..."
+
+SUGGEST_START_TS=$(date +%s)
 
 SUGGEST_RESPONSE="$(curl -sS -X POST "${RAG_BASE_URL}/suggest-fix" \
   -H "Content-Type: application/json" \
@@ -148,6 +162,9 @@ SUGGEST_RESPONSE="$(curl -sS -X POST "${RAG_BASE_URL}/suggest-fix" \
     "min_relevance": 2.0,
     "run_id": "'"$RUN_ID"'"
   }')"
+
+SUGGEST_END_TS=$(date +%s)
+echo "Suggest-fix response time: $((SUGGEST_END_TS - SUGGEST_START_TS))s"
 
 echo "Diagnosis:"
 if echo "$SUGGEST_RESPONSE" | jq empty >/dev/null 2>&1; then
@@ -196,7 +213,7 @@ if [[ "$fix_count" -gt 0 ]]; then
      else ""
      end) +
     (if (.patch_text // "") != "" then
-      "Patch:\n" + (.patch_text | split("\n") | map("  " + .) | join("\n")) + "\n"
+      "Patch:\n" + ((.patch_text | split("\n") | map(select(test("^```") | not))) | map("  " + .) | join("\n")) + "\n"
      else ""
      end) +
     (if (.workflow // []) | length > 0 then
@@ -208,3 +225,6 @@ else
   echo "No structured fixes generated."
 fi
 echo
+
+SCRIPT_END_TS=$(date +%s)
+echo "Total script runtime: $((SCRIPT_END_TS - SCRIPT_START_TS))s"

@@ -189,9 +189,12 @@ FIX_SUGGESTION_SYSTEM_PROMPT = (
     "5. Do NOT list alternatives unless evidence supports them (e.g., do not suggest 'Rename Dockerfile' without proving Dockerfile exists)\n"
     "6. target_file must be null when evidence is inconclusive or workflow is unverified\n"
     "7. patch_text must be null if exact change cannot be justified by evidence\n"
-    "8. safe_to_auto_apply=true only for deterministic, low-risk, fully verifiable fixes\n"
-    "9. NEVER assume branch names (don't hardcode main/master)\n"
-    "10. NEVER hallucinate files, configs, or commands not mentioned in logs/context\n"
+    "8. When patch_text is present, it MUST be plain git-style unified diff text only: no markdown fences, no ed-style diff, no prose around it\n"
+    "9. workflow must include three phases in order whenever a fix is known: verification, remediation, validation\n"
+    "10. If patch_text identifies an exact file change, target_changes should use action=modify/add/delete instead of inspect\n"
+    "11. safe_to_auto_apply=true only for deterministic, low-risk, fully verifiable fixes\n"
+    "12. NEVER assume branch names (don't hardcode main/master)\n"
+    "13. NEVER hallucinate files, configs, or commands not mentioned in logs/context\n"
 )
 
 FIX_SUGGESTION_TEMPLATE = """PROMPT_VERSION={prompt_version}
@@ -216,8 +219,8 @@ For each fix suggestion, provide these fields in JSON:
 - assumptions: array of assumptions (empty if none)
 - verification_steps: MUST include workflow/config verification FIRST, then file/code checks
 - alternatives_considered: array of alternatives that are EVIDENCE-SUPPORTED (never list unproven assumptions)
-- patch_text: unified diff if evidence supports exact change, otherwise null
-- workflow: array of {{"step": "name", "command": "cmd"}}; always verify config FIRST before mutation
+- patch_text: plain git-style unified diff only (for example: --- a/app.py, +++ b/app.py, @@, -old, +new); no markdown fences; null if exact change is not justified
+- workflow: array of {{"step": "name", "command": "cmd"}}; must progress through verification FIRST, then remediation, then validation
 - safe_to_auto_apply: boolean (true only if safe deterministic auto-apply is justified)
 - confidence: "High", "Medium", or "Low"
 - requires_review: boolean
@@ -226,9 +229,9 @@ CRITICAL: Respond with EXACTLY two lines only (no other text):
 DIAGNOSIS: <one-sentence root cause>
 FIXES: [<JSON array or empty []>]
 
-Example with config-first verification:
-DIAGNOSIS: Build fails because Dockerfile.prod cannot be found.
-FIXES: [{{"fix_type": "config_or_file_mismatch", "auto_fix_possible": false, "target_file": null, "target_confidence": "Low", "target_changes": [{{"file": ".github/workflows/build.yml", "action": "inspect", "reason": "Verify Dockerfile.prod reference in build command"}}, {{"file": "Dockerfile.prod", "action": "check_existence", "reason": "Check if file exists or was deleted"}}], "suggested_change": "Verify build command references correct Dockerfile before creating or modifying files.", "why_this_fix": "Error states Dockerfile.prod not found, but unclear if file was deleted, never created, or build command is misconfigured. Config verification must come first.", "evidence_used": ["Error message: 'open Dockerfile.prod: no such file or directory'", "Build command likely references Dockerfile.prod but command itself not shown in logs"], "assumptions": ["Build command is hardcoded to reference Dockerfile.prod", "File may have existed and was deleted, or never created"], "verification_steps": [{{"step": "Check workflow for Dockerfile reference", "command": "grep -n 'Dockerfile' .github/workflows/build.yml", "expected_signal": "Shows what Dockerfile name the workflow expects"}}, {{"step": "List Dockerfile files in repo", "command": "ls -la Dockerfile* || echo 'No Dockerfile variants found'", "expected_signal": "Shows if Dockerfile, Dockerfile.prod, or others exist"}}, {{"step": "Check file history", "command": "git log --oneline -- Dockerfile.prod | head -5", "expected_signal": "Confirms if file was deleted or never committed"}}], "alternatives_considered": ["Update workflow to reference a different Dockerfile if Dockerfile exists", "Create Dockerfile.prod based on Dockerfile template if it exists"], "patch_text": null, "workflow": [{{"step": "Create investigation branch", "command": "git checkout -b fix-dockerfile-reference"}}, {{"step": "Verify build workflow and Dockerfile variants", "command": "grep 'Dockerfile' .github/workflows/build.yml && ls -la Dockerfile*"}}, {{"step": "Check git history for Dockerfile.prod", "command": "git log --oneline -- Dockerfile.prod"}}, {{"step": "Decide and implement", "command": "Based on verification: update workflow path OR restore file OR create file with proper content"}}, {{"step": "Test build", "command": "docker build -f Dockerfile.prod ."}}, {{"step": "Open pull request with fix", "command": "gh pr create --title 'Fix Dockerfile reference after verification'"}}], "safe_to_auto_apply": false, "confidence": "Medium", "requires_review": true}}]
+Example with exact-code evidence:
+DIAGNOSIS: CI fails because app.py has a Python syntax error: the function definition on line 3 is missing a trailing colon.
+FIXES: [{{"fix_type": "code_syntax_error", "auto_fix_possible": true, "target_file": "app.py", "target_confidence": "High", "target_changes": [{{"file": "app.py", "action": "modify", "reason": "The failing line in app.py is shown directly in the traceback and requires a one-character syntax fix"}}], "suggested_change": "Add the missing colon to the function definition in app.py.", "why_this_fix": "The traceback identifies app.py line 3 and shows the exact invalid line `def main()` together with `SyntaxError: expected ':'`.", "evidence_used": ["Traceback points to app.py line 3", "Observed failing line is `def main()`", "Python reports `SyntaxError: expected ':'`"], "assumptions": [], "verification_steps": [{{"step": "Verify workflow executes app.py", "command": "grep -n 'python app.py' .github/workflows/failing-ci.yml", "expected_signal": "Confirms the workflow is intended to run app.py"}}, {{"step": "Confirm the current source line", "command": "sed -n '1,10p' app.py", "expected_signal": "Shows `def main()` without a colon on line 3"}}], "alternatives_considered": ["Check whether another script should be executed instead of app.py if workflow reference is wrong"], "patch_text": "--- a/app.py\n+++ b/app.py\n@@\n-def main()\n+def main():", "workflow": [{{"step": "Verify workflow reference", "command": "grep -n 'python app.py' .github/workflows/failing-ci.yml"}}, {{"step": "Apply syntax fix", "command": "python - <<'PY'\nfrom pathlib import Path\npath = Path('app.py')\npath.write_text(path.read_text().replace('def main()','def main():', 1))\nPY"}}, {{"step": "Validate Python syntax", "command": "python -m py_compile app.py"}}, {{"step": "Rerun the app locally", "command": "python app.py"}}], "safe_to_auto_apply": false, "confidence": "High", "requires_review": true}}]
 
 Respond now (EXACTLY two lines, DIAGNOSIS and FIXES):\n"""
 
@@ -418,6 +421,8 @@ class SuggestFixRequest(BaseModel):
     top_k: int = Field(default=5, ge=1, le=20)
     min_relevance: float = Field(default=1.2, ge=0.0, description="Distance threshold for filtering weak matches")
     apply_mode: bool = Field(default=False, description="If true, fixes will be auto-applied; if false, only suggested")
+    content_type: Optional[Literal["logs", "docs"]] = None
+    source: Optional[str] = None
 
     # Optional retrieval filters
     repo: Optional[str] = None
@@ -919,6 +924,10 @@ def suggest_fix(req: SuggestFixRequest):
     add_cost(endpoint="/suggest-fix", model=EMBED_MODEL, kind="embeddings", amount_usd=embed_cost)
 
     where_conditions = []
+    if req.content_type:
+        where_conditions.append({"content_type": req.content_type})
+    if req.source:
+        where_conditions.append({"source": req.source})
     if req.repo:
         where_conditions.append({"repo": req.repo})
     if req.pipeline:

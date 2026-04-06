@@ -7,10 +7,116 @@
     "must_cite": true
   },
   {
-    "name": "Logs structured output",
-    "question": "What could cause a connection reset?",
+    "name": "ask-docs-hpa",
+    "endpoint": "ask",
+    "question": "How does HPA scale in this system?",
+    "filters": { "content_type": "docs" },
+    "must_contain_any": ["CPU", "custom metrics", "scale"],
+    "must_cite": true,
+    "required_top_level_keys": ["answer", "retrieved", "prompt_version"]
+  },
+  {
+    "name": "ask-docs-routing",
+    "endpoint": "ask",
+    "question": "Explain the multi-model routing policy.",
+    "filters": { "content_type": "docs" },
+    "must_contain_any": ["routing", "policy", "model"],
+    "must_cite": true,
+    "required_top_level_keys": ["answer", "retrieved"]
+  },
+  {
+    "name": "ask-docs-inference-arch",
+    "endpoint": "ask",
+    "question": "Summarize the inference architecture.",
+    "filters": { "content_type": "docs" },
+    "must_contain_any": ["router", "inference", "service"],
+    "must_cite": true,
+    "required_top_level_keys": ["answer", "retrieved"]
+  },
+  {
+    "name": "ask-logs-connection-reset",
+    "endpoint": "ask",
+    "question": "What could cause a connection reset in the failure logs?",
     "filters": { "content_type": "logs" },
-    "must_contain_any": ["Evidence from context", "Hypotheses", "Next data to ingest"],
-    "must_cite": true
+    "must_contain_any": ["evidence", "verification", "context"],
+    "must_cite": true,
+    "required_top_level_keys": ["answer", "retrieved"]
+  },
+  {
+    "name": "ask-cicd-analysis-shape",
+    "endpoint": "ask",
+    "question": "Analyze this CI/CD failure and identify the first fix to apply now.",
+    "filters": { "content_type": "logs", "analysis_mode": "cicd" },
+    "must_contain_any": ["Failure Category", "Primary Diagnosis", "Fix First"],
+    "required_top_level_keys": ["answer", "retrieved", "usage"]
+  },
+  {
+    "name": "ask-docs-costs",
+    "endpoint": "ask",
+    "question": "How is cost tracked in this service?",
+    "filters": { "content_type": "docs" },
+    "must_contain_any": ["cost", "endpoint", "model"],
+    "must_cite": true,
+    "required_top_level_keys": ["answer", "retrieved"]
+  },
+  {
+    "name": "suggest-fix-structured-shape",
+    "endpoint": "suggest-fix",
+    "question": "Based on this failure, provide one primary diagnosis and structured fix suggestions.",
+    "filters": { "content_type": "logs" },
+    "required_top_level_keys": ["diagnosis", "fix_suggestions", "retrieved", "apply_mode"],
+    "nonempty_paths": ["diagnosis", "retrieved"],
+    "min_fix_count": 0
+  },
+  {
+    "name": "suggest-fix-fix-fields",
+    "endpoint": "suggest-fix",
+    "question": "Suggest evidence-based fixes with verification steps and a patch when justified.",
+    "filters": { "content_type": "logs" },
+    "required_top_level_keys": ["diagnosis", "fix_suggestions"],
+    "min_fix_count": 1,
+    "nonempty_paths": [
+      "fix_suggestions.0.fix_type",
+      "fix_suggestions.0.suggested_change",
+      "fix_suggestions.0.why_this_fix",
+      "fix_suggestions.0.evidence_used",
+      "fix_suggestions.0.verification_steps",
+      "fix_suggestions.0.workflow"
+    ]
+  },
+  {
+    "name": "suggest-fix-no-markdown-fence",
+    "endpoint": "suggest-fix",
+    "question": "Provide a structured fix suggestion with patch text only if exact change is justified by evidence.",
+    "filters": { "content_type": "logs" },
+    "required_top_level_keys": ["diagnosis", "fix_suggestions"],
+    "min_fix_count": 1,
+    "must_not_contain": ["```"]
+  },
+  {
+    "name": "suggest-fix-auto-apply-bool-present",
+    "endpoint": "suggest-fix",
+    "question": "Suggest safe fixes and indicate whether they are safe to auto-apply.",
+    "filters": { "content_type": "logs" },
+    "required_top_level_keys": ["diagnosis", "fix_suggestions"],
+    "min_fix_count": 1,
+    "nonempty_paths": ["fix_suggestions.0.safe_to_auto_apply", "fix_suggestions.0.target_confidence"]
+  },
+  {
+    "name": "suggest-fix-workflow-phase-shape",
+    "endpoint": "suggest-fix",
+    "question": "Provide fixes with verification first, then remediation, then validation.",
+    "filters": { "content_type": "logs" },
+    "required_top_level_keys": ["diagnosis", "fix_suggestions"],
+    "min_fix_count": 1,
+    "nonempty_paths": ["fix_suggestions.0.verification_steps", "fix_suggestions.0.workflow"]
+  },
+  {
+    "name": "suggest-fix-docs-filter-supported",
+    "endpoint": "suggest-fix",
+    "question": "Using documentation context only, suggest a safe operational fix strategy.",
+    "filters": { "content_type": "docs" },
+    "required_top_level_keys": ["diagnosis", "fix_suggestions", "retrieved"],
+    "nonempty_paths": ["diagnosis", "retrieved"]
   }
 ]
