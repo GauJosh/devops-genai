@@ -10,3 +10,5 @@ chroma_db/
 data/
 *.sqlite3
 *drawio*
+.executor*
+agent.md
