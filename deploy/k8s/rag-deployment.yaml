@@ -16,7 +16,7 @@ spec:
     spec:
       containers:
         - name: api
-          image: localhost/rag-service:1.0.14
+          image: localhost/rag-service:1.0.15
           imagePullPolicy: IfNotPresent
           ports:
             - containerPort: 8000
@@ -43,6 +43,19 @@ spec:
               value: "gpt-4o-mini"
             - name: INFERENCE_TIMEOUT_S
               value: "150"
+            # - name: PGVECTOR_DSN
+            #   valueFrom:
+            #     secretKeyRef:
+            #       name: devops-genai-secrets
+            #       key: PGVECTOR_DSN
+            - name: PGVECTOR_DSN
+              value: "postgresql://postgres:postgres@192.168.49.1:5432/devops_genai"
+            - name: PGVECTOR_TABLE
+              value: "devops_knowledge_chunks"
+            - name: VECTOR_BACKEND
+              value: "pgvector"
+            - name: EMBED_DIM
+              value: "1536"
           readinessProbe:
             httpGet:
               path: /healthz

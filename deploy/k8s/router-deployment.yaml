@@ -20,7 +20,7 @@ spec:
     spec:
       containers:
         - name: inference-router
-          image: localhost/inference-router:1.0.14
+          image: localhost/inference-router:1.0.15
           imagePullPolicy: IfNotPresent
           env:
             - name: OPENAI_API_KEY

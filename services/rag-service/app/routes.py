@@ -13,6 +13,12 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 from openai import OpenAI
 import chromadb
+try:
+    import psycopg
+    from psycopg.rows import dict_row
+except Exception:
+    psycopg = None
+    dict_row = None
 
 from .inference_client import generate_via_router
 
@@ -29,6 +35,10 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-4o-mini")
 EMBED_MODEL = os.getenv("OPENAI_EMBED_MODEL", "text-embedding-3-small")
 CHROMA_DIR = os.getenv("CHROMA_DIR", "/data/chroma_db")
+VECTOR_BACKEND = os.getenv("VECTOR_BACKEND", "chroma").strip().lower()
+PGVECTOR_DSN = os.getenv("PGVECTOR_DSN", "")
+PGVECTOR_TABLE = os.getenv("PGVECTOR_TABLE", "devops_knowledge_chunks")
+EMBED_DIM = int(os.getenv("EMBED_DIM", "1536"))
 
 PROMPT_VERSION = "v3"
 
@@ -276,25 +286,311 @@ def add_cost(endpoint: str, model: str, kind: str, amount_usd: float):
 
 
 # ---------------------------
-# Clients: OpenAI for embeddings, Chroma for storage
+# Clients: OpenAI for embeddings, pluggable vector storage (chroma/pgvector)
 # ---------------------------
 client = OpenAI(api_key=OPENAI_API_KEY) if OPENAI_API_KEY else None
+collection = None
+chroma_client = None
 
-try:
-    chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
-except Exception as exc:
-    default_fallback_chroma_dir = os.path.join(tempfile.gettempdir(), "chroma_db")
-    fallback_chroma_dir = os.getenv("CHROMA_DIR_FALLBACK", default_fallback_chroma_dir)
-    logger.warning(
-        "Failed to initialize Chroma at CHROMA_DIR=%s (%s). Falling back to %s",
-        CHROMA_DIR,
-        exc,
-        fallback_chroma_dir,
+
+def _ensure_pgvector_table():
+    if VECTOR_BACKEND != "pgvector":
+        return
+    if not PGVECTOR_DSN:
+        raise RuntimeError("VECTOR_BACKEND=pgvector requires PGVECTOR_DSN")
+    if psycopg is None:
+        raise RuntimeError("psycopg is required for pgvector backend")
+
+    create_table_sql = f"""
+    CREATE EXTENSION IF NOT EXISTS vector;
+    CREATE TABLE IF NOT EXISTS {PGVECTOR_TABLE} (
+        id TEXT PRIMARY KEY,
+        doc_id TEXT NOT NULL,
+        source TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        chunk_index INTEGER NOT NULL,
+        text_content TEXT NOT NULL,
+        embedding vector({EMBED_DIM}) NOT NULL,
+        repo TEXT,
+        pipeline TEXT,
+        environment TEXT,
+        status TEXT,
+        workflow TEXT,
+        service_name TEXT,
+        run_id TEXT,
+        created_at TIMESTAMPTZ DEFAULT now()
+    );
+    CREATE INDEX IF NOT EXISTS idx_{PGVECTOR_TABLE}_embedding_hnsw
+    ON {PGVECTOR_TABLE} USING hnsw (embedding vector_cosine_ops);
+    CREATE INDEX IF NOT EXISTS idx_{PGVECTOR_TABLE}_source ON {PGVECTOR_TABLE} (source);
+    CREATE INDEX IF NOT EXISTS idx_{PGVECTOR_TABLE}_doc_id ON {PGVECTOR_TABLE} (doc_id);
+    CREATE INDEX IF NOT EXISTS idx_{PGVECTOR_TABLE}_ctype ON {PGVECTOR_TABLE} (content_type);
+    """
+
+    with psycopg.connect(PGVECTOR_DSN, autocommit=True) as conn:
+        with conn.cursor() as cur:
+            cur.execute(create_table_sql)
+
+
+def _vector_to_pg(vector: List[float]) -> str:
+    return "[" + ",".join(str(float(v)) for v in vector) + "]"
+
+
+def _sql_filter_clause(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any]]:
+    if not filters:
+        return "", []
+
+    clauses: List[str] = []
+    params: List[Any] = []
+    for key, value in filters.items():
+        if value is None:
+            continue
+        clauses.append(f"{key} = %s")
+        params.append(value)
+
+    if not clauses:
+        return "", []
+    return "WHERE " + " AND ".join(clauses), params
+
+
+def storage_add(ids: List[str], documents: List[str], embeddings: List[List[float]], metadatas: List[Dict[str, Any]]):
+    if VECTOR_BACKEND == "pgvector":
+        rows = []
+        for _id, doc, emb, meta in zip(ids, documents, embeddings, metadatas):
+            rows.append(
+                (
+                    _id,
+                    str(meta.get("doc_id", "")),
+                    str(meta.get("source", "")),
+                    str(meta.get("content_type", "docs")),
+                    int(meta.get("chunk_index", -1)),
+                    doc,
+                    _vector_to_pg(emb),
+                    str(meta.get("repo", "")),
+                    str(meta.get("pipeline", "")),
+                    str(meta.get("environment", "")),
+                    str(meta.get("status", "")),
+                    str(meta.get("workflow", "")),
+                    str(meta.get("service_name", "")),
+                    str(meta.get("run_id", "")),
+                )
+            )
+
+        insert_sql = f"""
+        INSERT INTO {PGVECTOR_TABLE}
+        (id, doc_id, source, content_type, chunk_index, text_content, embedding,
+         repo, pipeline, environment, status, workflow, service_name, run_id)
+        VALUES
+        (%s, %s, %s, %s, %s, %s, %s::vector, %s, %s, %s, %s, %s, %s, %s)
+        ON CONFLICT (id) DO UPDATE SET
+          doc_id = EXCLUDED.doc_id,
+          source = EXCLUDED.source,
+          content_type = EXCLUDED.content_type,
+          chunk_index = EXCLUDED.chunk_index,
+          text_content = EXCLUDED.text_content,
+          embedding = EXCLUDED.embedding,
+          repo = EXCLUDED.repo,
+          pipeline = EXCLUDED.pipeline,
+          environment = EXCLUDED.environment,
+          status = EXCLUDED.status,
+          workflow = EXCLUDED.workflow,
+          service_name = EXCLUDED.service_name,
+          run_id = EXCLUDED.run_id
+        """
+        with psycopg.connect(PGVECTOR_DSN, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.executemany(insert_sql, rows)
+        return
+
+    collection.add(
+        ids=ids,
+        documents=documents,
+        embeddings=embeddings,
+        metadatas=metadatas,
     )
-    os.makedirs(fallback_chroma_dir, exist_ok=True)
-    chroma_client = chromadb.PersistentClient(path=fallback_chroma_dir)
 
-collection = chroma_client.get_or_create_collection(name="devops_knowledge")
+
+def storage_query(query_embedding: List[float], n_results: int, filters: Optional[Dict[str, Any]]) -> Dict[str, List[List[Any]]]:
+    if VECTOR_BACKEND == "pgvector":
+        where_clause, where_params = _sql_filter_clause(filters)
+        vec = _vector_to_pg(query_embedding)
+        sql = f"""
+        SELECT
+            id,
+            text_content,
+            source,
+            content_type,
+            chunk_index,
+            repo,
+            pipeline,
+            environment,
+            status,
+            workflow,
+            service_name,
+            run_id,
+            doc_id,
+            (embedding <=> %s::vector) AS distance
+        FROM {PGVECTOR_TABLE}
+        {where_clause}
+        ORDER BY embedding <=> %s::vector
+        LIMIT %s
+        """
+        params = [vec] + where_params + [vec, n_results]
+        with psycopg.connect(PGVECTOR_DSN, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+
+        docs = [row["text_content"] for row in rows]
+        metas = [
+            {
+                "id": row["id"],
+                "doc_id": row["doc_id"],
+                "source": row["source"],
+                "content_type": row["content_type"],
+                "chunk_index": row["chunk_index"],
+                "repo": row["repo"] or "",
+                "pipeline": row["pipeline"] or "",
+                "environment": row["environment"] or "",
+                "status": row["status"] or "",
+                "workflow": row["workflow"] or "",
+                "service_name": row["service_name"] or "",
+                "run_id": row["run_id"] or "",
+            }
+            for row in rows
+        ]
+        dists = [float(row["distance"]) if row["distance"] is not None else None for row in rows]
+        return {"documents": [docs], "metadatas": [metas], "distances": [dists]}
+
+    query_kwargs = dict(
+        query_embeddings=[query_embedding],
+        n_results=n_results,
+        include=["documents", "metadatas", "distances"],
+    )
+    if filters:
+        where_conditions = [{k: v} for k, v in filters.items()]
+        if len(where_conditions) == 1:
+            query_kwargs["where"] = where_conditions[0]
+        elif len(where_conditions) > 1:
+            query_kwargs["where"] = {"$and": where_conditions}
+    return collection.query(**query_kwargs)
+
+
+def storage_get(limit: int, filters: Optional[Dict[str, Any]] = None) -> Dict[str, List[Any]]:
+    if VECTOR_BACKEND == "pgvector":
+        where_clause, params = _sql_filter_clause(filters)
+        sql = f"""
+        SELECT id, doc_id, source, content_type, chunk_index, text_content,
+               repo, pipeline, environment, status, workflow, service_name, run_id
+        FROM {PGVECTOR_TABLE}
+        {where_clause}
+        ORDER BY source, content_type, doc_id, chunk_index
+        LIMIT %s
+        """
+        params.append(limit)
+        with psycopg.connect(PGVECTOR_DSN, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, params)
+                rows = cur.fetchall()
+        return {
+            "ids": [row["id"] for row in rows],
+            "documents": [row["text_content"] for row in rows],
+            "metadatas": [
+                {
+                    "doc_id": row["doc_id"],
+                    "source": row["source"],
+                    "content_type": row["content_type"],
+                    "chunk_index": row["chunk_index"],
+                    "repo": row["repo"] or "",
+                    "pipeline": row["pipeline"] or "",
+                    "environment": row["environment"] or "",
+                    "status": row["status"] or "",
+                    "workflow": row["workflow"] or "",
+                    "service_name": row["service_name"] or "",
+                    "run_id": row["run_id"] or "",
+                }
+                for row in rows
+            ],
+        }
+
+    kwargs = dict(include=["documents", "metadatas"])
+    if filters:
+        kwargs["where"] = filters
+    return collection.get(limit=limit, **kwargs)
+
+
+def storage_source_counts(limit: int = 5000) -> Dict[Tuple[str, str], int]:
+    if VECTOR_BACKEND == "pgvector":
+        sql = f"""
+        SELECT source, content_type, count(*) AS chunks
+        FROM {PGVECTOR_TABLE}
+        GROUP BY source, content_type
+        ORDER BY source, content_type
+        LIMIT %s
+        """
+        with psycopg.connect(PGVECTOR_DSN, row_factory=dict_row) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, [limit])
+                rows = cur.fetchall()
+        return {(row["source"], row["content_type"]): int(row["chunks"]) for row in rows}
+
+    data = collection.get(include=["metadatas"], limit=limit)
+    metadatas = data.get("metadatas", []) or []
+    counts: Dict[Tuple[str, str], int] = {}
+    for m in metadatas:
+        src = m.get("source", "unknown")
+        ctype = m.get("content_type", "unknown")
+        key = (src, ctype)
+        counts[key] = counts.get(key, 0) + 1
+    return counts
+
+
+def storage_delete_source(source: str) -> int:
+    if VECTOR_BACKEND == "pgvector":
+        sql = f"DELETE FROM {PGVECTOR_TABLE} WHERE source = %s"
+        with psycopg.connect(PGVECTOR_DSN, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql, [source])
+                return int(cur.rowcount or 0)
+
+    data = collection.get(where={"source": source}, include=["metadatas"])
+    ids = data.get("ids", []) or []
+    if ids:
+        collection.delete(ids=ids)
+    return len(ids)
+
+
+def storage_reset():
+    global collection
+    if VECTOR_BACKEND == "pgvector":
+        sql = f"TRUNCATE TABLE {PGVECTOR_TABLE}"
+        with psycopg.connect(PGVECTOR_DSN, autocommit=True) as conn:
+            with conn.cursor() as cur:
+                cur.execute(sql)
+        return
+
+    chroma_client.delete_collection("devops_knowledge")
+    collection = chroma_client.get_or_create_collection(name="devops_knowledge")
+
+
+if VECTOR_BACKEND == "pgvector":
+    _ensure_pgvector_table()
+else:
+    try:
+        chroma_client = chromadb.PersistentClient(path=CHROMA_DIR)
+    except Exception as exc:
+        default_fallback_chroma_dir = os.path.join(tempfile.gettempdir(), "chroma_db")
+        fallback_chroma_dir = os.getenv("CHROMA_DIR_FALLBACK", default_fallback_chroma_dir)
+        logger.warning(
+            "Failed to initialize Chroma at CHROMA_DIR=%s (%s). Falling back to %s",
+            CHROMA_DIR,
+            exc,
+            fallback_chroma_dir,
+        )
+        os.makedirs(fallback_chroma_dir, exist_ok=True)
+        chroma_client = chromadb.PersistentClient(path=fallback_chroma_dir)
+
+    collection = chroma_client.get_or_create_collection(name="devops_knowledge")
 
 
 # ---------------------------
@@ -651,13 +947,18 @@ def enforce_fix_confidence_policy(
 # ---------------------------
 @router.get("/healthz")
 def healthz():
-    return {
+    payload = {
         "status": "ok",
         "model": OPENAI_MODEL,
         "embed_model": EMBED_MODEL,
         "prompt_version": PROMPT_VERSION,
-        "chroma_dir": CHROMA_DIR,
+        "vector_backend": VECTOR_BACKEND,
     }
+    if VECTOR_BACKEND == "chroma":
+        payload["chroma_dir"] = CHROMA_DIR
+    else:
+        payload["pgvector_table"] = PGVECTOR_TABLE
+    return payload
 
 
 @router.post("/chat")
@@ -754,7 +1055,7 @@ def ingest(req: IngestRequest):
         for i in range(len(chunks))
     ]
 
-    collection.add(
+    storage_add(
         ids=ids,
         documents=chunks,
         embeddings=embeddings,
@@ -819,41 +1120,27 @@ def ask(req: AskRequest):
     embed_cost = cost_usd(EMBED_MODEL, input_tokens=q_embed_tokens, output_tokens=0)
     add_cost(endpoint="/ask", model=EMBED_MODEL, kind="embeddings", amount_usd=embed_cost)
 
-    where_conditions = []
+    filters: Dict[str, Any] = {}
     if req.content_type:
-        where_conditions.append({"content_type": req.content_type})
+        filters["content_type"] = req.content_type
     if req.source:
-        where_conditions.append({"source": req.source})
+        filters["source"] = req.source
     if req.repo:
-        where_conditions.append({"repo": req.repo})
+        filters["repo"] = req.repo
     if req.pipeline:
-        where_conditions.append({"pipeline": req.pipeline})
+        filters["pipeline"] = req.pipeline
     if req.environment:
-        where_conditions.append({"environment": req.environment})
+        filters["environment"] = req.environment
     if req.status:
-        where_conditions.append({"status": req.status})
+        filters["status"] = req.status
     if req.workflow:
-        where_conditions.append({"workflow": req.workflow})
+        filters["workflow"] = req.workflow
     if req.service_name:
-        where_conditions.append({"service_name": req.service_name})
+        filters["service_name"] = req.service_name
     if req.run_id:
-        where_conditions.append({"run_id": req.run_id})
+        filters["run_id"] = req.run_id
 
-    where = None
-    if len(where_conditions) == 1:
-        where = where_conditions[0]
-    elif len(where_conditions) > 1:
-        where = {"$and": where_conditions}
-
-    query_kwargs = dict(
-        query_embeddings=[q_embed],
-        n_results=req.top_k,
-        include=["documents", "metadatas", "distances"],
-    )
-    if where:
-        query_kwargs["where"] = where
-
-    results = collection.query(**query_kwargs)
+    results = storage_query(query_embedding=q_embed, n_results=req.top_k, filters=filters or None)
 
     docs = results.get("documents", [[]])[0]
     metas = results.get("metadatas", [[]])[0]
@@ -1038,45 +1325,29 @@ def suggest_fix(req: SuggestFixRequest):
     embed_cost = cost_usd(EMBED_MODEL, input_tokens=q_embed_tokens, output_tokens=0)
     add_cost(endpoint="/suggest-fix", model=EMBED_MODEL, kind="embeddings", amount_usd=embed_cost)
 
-    def build_where(conditions: List[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
-        if len(conditions) == 1:
-            return conditions[0]
-        if len(conditions) > 1:
-            return {"$and": conditions}
-        return None
-
-    incident_where_conditions: List[Dict[str, Any]] = []
+    incident_filters: Dict[str, Any] = {}
     if req.content_type:
-        incident_where_conditions.append({"content_type": req.content_type})
+        incident_filters["content_type"] = req.content_type
     else:
-        incident_where_conditions.append({"content_type": "logs"})
+        incident_filters["content_type"] = "logs"
     if req.source:
-        incident_where_conditions.append({"source": req.source})
+        incident_filters["source"] = req.source
     if req.repo:
-        incident_where_conditions.append({"repo": req.repo})
+        incident_filters["repo"] = req.repo
     if req.pipeline:
-        incident_where_conditions.append({"pipeline": req.pipeline})
+        incident_filters["pipeline"] = req.pipeline
     if req.environment:
-        incident_where_conditions.append({"environment": req.environment})
+        incident_filters["environment"] = req.environment
     if req.status:
-        incident_where_conditions.append({"status": req.status})
+        incident_filters["status"] = req.status
     if req.workflow:
-        incident_where_conditions.append({"workflow": req.workflow})
+        incident_filters["workflow"] = req.workflow
     if req.service_name:
-        incident_where_conditions.append({"service_name": req.service_name})
+        incident_filters["service_name"] = req.service_name
     if req.run_id:
-        incident_where_conditions.append({"run_id": req.run_id})
+        incident_filters["run_id"] = req.run_id
 
-    incident_query_kwargs = dict(
-        query_embeddings=[q_embed],
-        n_results=req.top_k,
-        include=["documents", "metadatas", "distances"],
-    )
-    incident_where = build_where(incident_where_conditions)
-    if incident_where:
-        incident_query_kwargs["where"] = incident_where
-
-    incident_results = collection.query(**incident_query_kwargs)
+    incident_results = storage_query(query_embedding=q_embed, n_results=req.top_k, filters=incident_filters)
 
     retrieved: List[RetrievedChunk] = []
     context_parts: List[str] = []
@@ -1147,26 +1418,17 @@ def suggest_fix(req: SuggestFixRequest):
     append_query_results(incident_results, req.min_relevance)
 
     if req.use_kb:
-        kb_where_conditions: List[Dict[str, Any]] = [{"content_type": "docs"}]
+        kb_filters: Dict[str, Any] = {"content_type": "docs"}
         if req.kb_source:
-            kb_where_conditions.append({"source": req.kb_source})
+            kb_filters["source"] = req.kb_source
         if req.repo:
-            kb_where_conditions.append({"repo": req.repo})
+            kb_filters["repo"] = req.repo
         if req.pipeline:
-            kb_where_conditions.append({"pipeline": req.pipeline})
+            kb_filters["pipeline"] = req.pipeline
         if req.workflow:
-            kb_where_conditions.append({"workflow": req.workflow})
+            kb_filters["workflow"] = req.workflow
 
-        kb_query_kwargs = dict(
-            query_embeddings=[q_embed],
-            n_results=req.kb_top_k,
-            include=["documents", "metadatas", "distances"],
-        )
-        kb_where = build_where(kb_where_conditions)
-        if kb_where:
-            kb_query_kwargs["where"] = kb_where
-
-        kb_results = collection.query(**kb_query_kwargs)
+        kb_results = storage_query(query_embedding=q_embed, n_results=req.kb_top_k, filters=kb_filters)
         append_query_results(kb_results, req.kb_min_relevance)
 
     if not retrieved:
@@ -1336,15 +1598,7 @@ def suggest_fix(req: SuggestFixRequest):
 
 @router.get("/sources", response_model=List[SourceSummary])
 def list_sources(limit: int = 5000):
-    data = collection.get(include=["metadatas"], limit=limit)
-    metadatas = data.get("metadatas", []) or []
-
-    counts: Dict[tuple, int] = {}
-    for m in metadatas:
-        src = m.get("source", "unknown")
-        ctype = m.get("content_type", "unknown")
-        key = (src, ctype)
-        counts[key] = counts.get(key, 0) + 1
+    counts = storage_source_counts(limit=limit)
 
     out = [
         SourceSummary(source=src, content_type=ctype, chunks=n)
@@ -1361,19 +1615,17 @@ def list_ingested(
     doc_id: Optional[str] = None,
     run_id: Optional[str] = None,
 ):
-    where = {}
+    where: Dict[str, Any] = {}
     if source:
         where["source"] = source
     if content_type:
         where["content_type"] = content_type
     if doc_id:
         where["doc_id"] = doc_id
+    if run_id:
+        where["run_id"] = run_id
 
-    kwargs = dict(include=["documents", "metadatas"])
-    if where:
-        kwargs["where"] = where
-
-    data = collection.get(limit=limit, **kwargs)
+    data = storage_get(limit=limit, filters=where or None)
 
     ids = data.get("ids", []) or []
     docs = data.get("documents", []) or []
@@ -1421,18 +1673,14 @@ def reset_collection(confirm: bool = False):
     if not confirm:
         raise HTTPException(status_code=400, detail="Set confirm=true to reset")
 
-    chroma_client.delete_collection("devops_knowledge")
-    global collection
-    collection = chroma_client.get_or_create_collection(name="devops_knowledge")
+    storage_reset()
     return {"status": "ok", "message": "collection reset"}
 
 
 @router.delete("/delete_source")
 def delete_source(source: str):
-    data = collection.get(where={"source": source}, include=["metadatas"])
-    ids = data.get("ids", []) or []
-    if not ids:
+    deleted = storage_delete_source(source)
+    if deleted == 0:
         return {"status": "ok", "deleted": 0, "source": source}
 
-    collection.delete(ids=ids)
-    return {"status": "ok", "deleted": len(ids), "source": source}
+    return {"status": "ok", "deleted": deleted, "source": source}
