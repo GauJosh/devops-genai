@@ -1,3 +1,9 @@
+"""
+Mock Inference Adapter Module
+
+Implements a no-op adapter for testing and development. Returns synthetic responses
+without making actual API calls. Useful for integration testing and CI/CD pipelines.
+"""
 import time
 from ..schemas import GenerateRequest, GenerateResponse, Usage
 

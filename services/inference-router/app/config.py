@@ -1,3 +1,9 @@
+"""
+Inference Router Configuration Module
+
+Loads and validates configuration from environment variables for provider selection,
+fallback policies, and deployment settings.
+"""
 import os
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")

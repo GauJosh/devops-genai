@@ -1,3 +1,18 @@
+"""
+RAG Service Routes Module
+
+Implements API endpoints for document ingestion, semantic search, and fix suggestions using
+pgvector for vector storage and OpenAI for embeddings and generation. Supports both Chroma and
+pgvector backends with full CI/CD context awareness for targeted failure analysis.
+
+Key endpoints:
+  - POST /ingest: Ingest documents/logs with chunking and embedding
+  - POST /ask: Semantic Q&A with RAG context and citations
+  - POST /suggest-fix: Structured CI/CD failure diagnosis and remediation
+  - POST /chat: Conversational assistant with context
+  - GET /sources: List ingested data sources and chunk counts
+  - DELETE /reset: Clear all vector data (dev/test only)
+"""
 import os
 import uuid
 import time
@@ -257,10 +272,28 @@ DEFAULT_PRICING_PER_1M = {
 
 
 def get_pricing(model: str) -> dict:
+    """Retrieve pricing configuration for a language model.
+
+    Args:
+        model: Model identifier (e.g., 'gpt-4o-mini', 'text-embedding-3-small')
+
+    Returns:
+        dict: Pricing dictionary with 'input' and 'output' keys (per 1M tokens).
+    """
     return DEFAULT_PRICING_PER_1M.get(model, {"input": 0.0, "output": 0.0})
 
 
 def cost_usd(model: str, input_tokens: int = 0, output_tokens: int = 0) -> float:
+    """Calculate USD cost for LLM API usage.
+
+    Args:
+        model: Model identifier
+        input_tokens: Number of input tokens consumed
+        output_tokens: Number of output tokens generated
+
+    Returns:
+        float: Estimated cost in USD
+    """
     p = get_pricing(model)
     return (input_tokens / 1_000_000) * p["input"] + (output_tokens / 1_000_000) * p["output"]
 
@@ -333,6 +366,22 @@ def _ensure_pgvector_table():
 
 
 def _vector_to_pg(vector: List[float]) -> str:
+    """Convert a float vector to pgvector SQL format.
+
+    Args:
+        vector: List of float values
+"""Build SQL WHERE clause and parameters from metadata filter dictionary.
+
+    Args:
+        filters: Dictionary of metadata filters (source, repo, pipeline, etc.)
+
+    Returns:
+        Tuple[str, List]: SQL WHERE clause fragment and parameter list for safe queries
+    """
+    
+    Returns:
+        str: SQL-formatted vector string, e.g. "[0.1,0.2,0.3]"
+    """
     return "[" + ",".join(str(float(v)) for v in vector) + "]"
 
 
@@ -346,6 +395,14 @@ def _sql_filter_clause(filters: Optional[Dict[str, Any]]) -> Tuple[str, List[Any
         if value is None:
             continue
         clauses.append(f"{key} = %s")
+    """Add vectorized chunks to pgvector or Chroma storage backend.
+
+    Args:
+        ids: Unique identifiers for each chunk
+        documents: Text content of each chunk
+        embeddings: Embedding vectors (1536-dim from text-embedding-3-small)
+        metadatas: Metadata dictionaries (source, content_type, repo, pipeline, etc.)
+    """
         params.append(value)
 
     if not clauses:
@@ -403,6 +460,16 @@ def storage_add(ids: List[str], documents: List[str], embeddings: List[List[floa
         return
 
     collection.add(
+    """Perform approximate nearest-neighbor search on vector storage.
+
+    Args:
+        query_embedding: Query embedding vector (1536-dim)
+        n_results: Maximum number of results to return
+        filters: Optional metadata filters for refined search
+
+    Returns:
+        dict: Results with 'ids', 'documents', 'metadatas', 'distances' keys
+    """
         ids=ids,
         documents=documents,
         embeddings=embeddings,

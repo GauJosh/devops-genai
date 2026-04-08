@@ -1,4 +1,27 @@
-#!/usr/bin/env python3
+"""
+Suggest-Fix Executor Script
+
+Pure Python CLI tool for autonomous CI/CD failure diagnosis and remediation.
+
+Workflow:
+  1. Fetch latest failed CI run from GitHub
+  2. Ingest failure logs to pgvector via /ingest-log
+  3. Call /suggest-fix endpoint for structured analysis
+  4. Run auto-derived validation commands
+  5. Apply patch and create PR if safety gates pass
+
+Key features:
+  - Multi-stage validation with evidence collection
+  - Confidence-based gating for PR creation
+  - Fallback error handling for partial failures
+  - Comprehensive audit logging and cost tracking
+
+Usage:
+  python tools/suggest_fix_executor.py --agent-url http://localhost:18000 \\
+    --github-repo owner/repo --github-workflow workflow.yml --ingest-logs
+
+For detailed invocation options, run with --help.
+"""
 import argparse
 import json
 import re

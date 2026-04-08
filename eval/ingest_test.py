@@ -5,6 +5,17 @@ End-to-end pgvector proof:
   3. Call /suggest-fix
   4. Check /sources
 """
+"""
+End-to-End Ingestion Test Script
+
+Smoke test for pgvector + RAG system integration. Verifies:
+  1. KB markdown ingestion to pgvector
+  2. Synthetic failure log ingestion
+  3. /suggest-fix endpoint with RAG context
+  4. /sources endpoint for data auditing
+
+Run: python eval/ingest_test.py
+"""
 import json, requests, pathlib, sys
 
 BASE = "http://localhost:18000"

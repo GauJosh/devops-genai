@@ -1,3 +1,14 @@
+"""
+Inference Router Routes Module
+
+Implements intelligent request routing for LLM inference across multiple providers (OpenAI, Ollama, mock).
+Features include provider selection based on model hints, fallback logic, request tracking, and Prometheus metrics.
+
+Key endpoints:
+  - POST /v1/generate: Route inference requests to appropriate provider with fallback
+  - GET /healthz: Service health check
+  - GET /metrics: Prometheus metrics for monitoring
+"""
 import json
 import logging
 import time
@@ -32,6 +43,17 @@ MAX_PRIMARY_RETRIES = 1
 
 
 def get_adapter(provider_name: str):
+    """Factory function to instantiate the appropriate inference adapter.
+
+    Args:
+        provider_name: Provider identifier ('openai', 'ollama', 'mock')
+
+    Returns:
+        Adapter instance
+
+    Raises:
+        ValueError: If provider is not supported
+    """
     if provider_name == "openai":
         return OpenAIAdapter()
     if provider_name == "mock":

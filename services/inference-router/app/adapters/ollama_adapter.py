@@ -1,3 +1,9 @@
+"""
+Ollama Inference Adapter Module
+
+Implements inference adapter for local Ollama LLM service. Supports streaming and non-streaming
+completions with configurable model selection.
+"""
 import requests
 import time
 from ..schemas import GenerateRequest, GenerateResponse, Usage

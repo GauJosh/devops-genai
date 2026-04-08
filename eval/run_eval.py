@@ -1,3 +1,11 @@
+"""
+Evaluation Suite Runner Module
+
+Executes structured evaluation tests against the deployed RAG service to measure
+response quality, retrieval accuracy, and end-to-end latency.
+
+Loads test cases from eval/golden.json and compares outputs against expected results.
+"""
 import json
 import sys
 import requests

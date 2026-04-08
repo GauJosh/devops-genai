@@ -1,3 +1,9 @@
+"""
+OpenAI Inference Adapter Module
+
+Implements inference adapter for conducting requests to OpenAI's chat completions API.
+Handles authentication, retries, and response parsing.
+"""
 import time
 from openai import OpenAI
 from ..schemas import GenerateRequest, GenerateResponse, Usage

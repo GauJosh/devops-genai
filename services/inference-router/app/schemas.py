@@ -1,3 +1,8 @@
+"""
+Inference Router Schemas Module
+
+Pydantic models for request/response validation and serialization for the inference router API.
+"""
 from pydantic import BaseModel, Field, ConfigDict
 from typing import List, Literal, Optional, Dict, Any
 

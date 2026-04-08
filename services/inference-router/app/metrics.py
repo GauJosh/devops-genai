@@ -1,3 +1,9 @@
+"""
+Inference Router Metrics Module
+
+Defines Prometheus metrics for monitoring inference requests, latencies, token usage,
+and failure rates across providers.
+"""
 from prometheus_client import Counter, Histogram
 
 INFERENCE_REQUESTS_TOTAL = Counter(
